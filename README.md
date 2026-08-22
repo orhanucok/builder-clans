@@ -18,6 +18,18 @@ microservice sprawl, no premature distribution.
 
 ---
 
+## 🚀 Deploy to Vercel — 5 minutes
+
+The app boots with the **in-memory data store** by default, so you can deploy a
+fully working demo without provisioning Supabase first. Public URL, free SSL,
+zero config.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/orhanucok/builder-clans&project-name=builder-clans&repository-name=builder-clans)
+
+Step-by-step instructions in [`DEPLOY.md`](./DEPLOY.md).
+
+---
+
 ## Highlights
 
 - **Project-first discovery** — feed of projects, not people.
