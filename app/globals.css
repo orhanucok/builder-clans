@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   Builder Clans — Design Tokens
+   Premium · Technical · Energetic
+   ========================================================================= */
+
+@layer base {
+  :root {
+    /* Light theme — clean, off-white canvas for clarity */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 222 47% 11%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 47% 11%;
+
+    /* Domain accent colors — used for status, levels, ship badges, etc. */
+    --reputation: 217 91% 60%;
+    --xp: 38 92% 50%;
+    --ship: 142 71% 45%;
+    --trial: 271 81% 56%;
+
+    --radius: 0.625rem;
+
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  .dark {
+    /* Dark theme — primary deployment target. Deep, focused, premium. */
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222 47% 11%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 18%;
+    --input: 217 33% 18%;
+    --ring: 213 27% 84%;
+
+    --reputation: 217 91% 67%;
+    --xp: 38 92% 55%;
+    --ship: 142 71% 50%;
+    --trial: 271 81% 66%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  /* Selection — branded, subtle */
+  ::selection {
+    background-color: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+
+  /* Focus ring — keyboard-only, polite */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  .container-narrow {
+    @apply mx-auto w-full max-w-3xl px-5;
+  }
+
+  .container-wide {
+    @apply mx-auto w-full max-w-7xl px-5;
+  }
+
+  /* Shimmer skeleton placeholder */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Glowing accent for ship / live / new */
+  .glow-ship {
+    box-shadow: 0 0 0 1px hsl(var(--ship) / 0.4),
+      0 0 24px hsl(var(--ship) / 0.15);
+  }
+
+  /* Match score gradient bar */
+  .match-gradient {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--destructive)) 0%,
+      hsl(var(--xp)) 50%,
+      hsl(var(--ship)) 100%
+    );
+  }
+
+  /* Pill / chip base */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground;
+  }
+  .chip-primary {
+    @apply border-primary/30 bg-primary/10 text-primary;
+  }
+  .chip-ship {
+    @apply border-ship/30 bg-ship/10 text-ship;
+  }
+  .chip-trial {
+    @apply border-trial/30 bg-trial/10 text-trial;
+  }
+  .chip-rep {
+    @apply border-reputation/30 bg-reputation/10 text-reputation;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-border;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
