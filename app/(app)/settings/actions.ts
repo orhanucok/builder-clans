@@ -3,7 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded } from '@/lib/db/store';
+import {
+  updateProfile, setProfileSkills, setProfileInterests, getProfileById,
+} from '@/lib/db/store/queries';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
 
 export interface SettingsResult {
@@ -15,8 +18,8 @@ export interface SettingsResult {
 export async function updateProfileAction(
   input: z.input<typeof profileUpdateSchema>,
 ): Promise<SettingsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
   const me = await requireUser();
+  await ensureSeeded();
   const parsed = profileUpdateSchema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -25,7 +28,6 @@ export async function updateProfileAction(
     }
     return { ok: false, error: 'Please fix the highlighted fields.', fieldErrors };
   }
-  const supabase = await createServerSupabase();
   const data = parsed.data;
   const update: Record<string, unknown> = {};
   if (data.userType) update.user_type = data.userType;
@@ -37,29 +39,13 @@ export async function updateProfileAction(
   if (data.countryCode) update.country_code = data.countryCode;
   if (data.weeklyHours) update.weekly_hours = data.weeklyHours;
   if (data.avatarUrl) update.avatar_url = data.avatarUrl;
-  update.updated_at = new Date().toISOString();
-  if (Object.keys(update).length > 1) {
-    const { error } = await supabase.from('profiles').update(update).eq('id', me.id);
-    if (error) return { ok: false, error: error.message };
+  if (Object.keys(update).length > 0) {
+    updateProfile(me.id, update as never);
   }
-
-  if (data.skills) {
-    await supabase.from('profile_skills').delete().eq('profile_id', me.id);
-    if (data.skills.length) {
-      await supabase
-        .from('profile_skills')
-        .insert(data.skills.map((skill) => ({ profile_id: me.id, skill })));
-    }
-  }
-  if (data.interests) {
-    await supabase.from('profile_interests').delete().eq('profile_id', me.id);
-    if (data.interests.length) {
-      await supabase
-        .from('profile_interests')
-        .insert(data.interests.map((interest) => ({ profile_id: me.id, interest })));
-    }
-  }
+  if (data.skills) setProfileSkills(me.id, data.skills);
+  if (data.interests) setProfileInterests(me.id, data.interests);
+  const profile = getProfileById(me.id);
   revalidatePath('/settings');
-  revalidatePath(`/people/${(await supabase.from('profiles').select('username').eq('id', me.id).single()).data?.username ?? ''}`);
+  if (profile) revalidatePath(`/people/${profile.username}`);
   return { ok: true };
 }

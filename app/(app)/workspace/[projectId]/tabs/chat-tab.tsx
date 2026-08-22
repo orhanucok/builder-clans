@@ -6,8 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { createBrowserSupabase } from '@/lib/db/supabase-browser';
-import { isSupabaseConfigured } from '@/lib/env';
+import { sendChatMessageAction, listChatMessagesAction } from '../../actions';
 import { cn, formatRelative } from '@/lib/utils';
 
 interface Member {
@@ -32,61 +31,41 @@ interface ChatTabProps {
   members: Member[];
 }
 
-export function ChatTab({ channelId, currentUserId, canPost, members }: ChatTabProps) {
+export function ChatTab({ projectId, channelId: _channelId, currentUserId, canPost, members }: ChatTabProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [pending, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
   const scroller = useRef<HTMLDivElement | null>(null);
 
+  // Polling-based chat: every 4 seconds, refresh messages
   useEffect(() => {
-    if (!channelId || !isSupabaseConfigured()) return;
-    const supabase = createBrowserSupabase();
     let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('id, content, sender_id, created_at')
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true })
-        .limit(200);
-      if (!cancelled) {
-        setMessages((data ?? []) as Message[]);
-        setLoading(false);
-      }
-    })();
-    const sub = supabase
-      .channel(`project-chat:${channelId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
-        (payload) => setMessages((m) => [...m, payload.new as Message]),
-      )
-      .subscribe();
-    return () => {
-      cancelled = true;
-      sub.unsubscribe();
+    const load = async () => {
+      const list = await listChatMessagesAction(projectId, 200);
+      if (cancelled) return;
+      setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
+      setLoading(false);
     };
-  }, [channelId]);
+    load();
+    const t = setInterval(load, 4000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [projectId]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [messages.length]);
 
   function send() {
-    if (!draft.trim() || !channelId) return;
+    if (!draft.trim()) return;
     const text = draft.trim();
     setDraft('');
     startTransition(async () => {
-      const supabase = createBrowserSupabase();
-      await supabase.from('messages').insert({
-        channel_id: channelId,
-        content: text,
-        sender_id: currentUserId,
-        reply_to: null,
-        edited_at: null,
-        deleted_at: null,
-      });
+      const res = await sendChatMessageAction({ projectId, content: text });
+      if (!res.ok) return;
+      // Re-fetch
+      const list = await listChatMessagesAction(projectId, 200);
+      setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
     });
   }
 

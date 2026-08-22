@@ -3,7 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded } from '@/lib/db/store';
+import {
+  createProject, updateProject, getProjectById, getProjectBySlug,
+  setProjectSkills, addProjectMember, listProjects,
+} from '@/lib/db/store/queries';
 import { projectCreateSchema, projectUpdateSchema } from '@/lib/validation/schemas';
 import { slugify } from '@/lib/utils';
 import { awardXp } from '@/lib/xp/award';
@@ -16,12 +20,9 @@ export interface ProjectActionResult {
   id?: string;
 }
 
-/**
- * Create a project. The owner becomes the first project_member of type OWNER.
- */
 export async function createProjectAction(input: unknown): Promise<ProjectActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase is not configured.' };
   const me = await requireUser();
+  await ensureSeeded();
   const parsed = projectCreateSchema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -34,21 +35,14 @@ export async function createProjectAction(input: unknown): Promise<ProjectAction
   if (data.weeklyCommitmentMin > data.weeklyCommitmentMax) {
     return { ok: false, error: 'Minimum commitment cannot exceed maximum.' };
   }
-  const supabase = await createServerSupabase();
 
   // Make sure slug is unique
   let slug = slugify(data.title);
   let suffix = 0;
-  // attempt a few times; if still conflict, append a short id
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const candidate = suffix === 0 ? slug : `${slug}-${suffix}`;
-    const { data: dup } = await supabase
-      .from('projects')
-      .select('id')
-      .eq('slug', candidate)
-      .maybeSingle();
-    if (!dup) {
+    if (!getProjectBySlug(candidate)) {
       slug = candidate;
       break;
     }
@@ -59,53 +53,36 @@ export async function createProjectAction(input: unknown): Promise<ProjectAction
     }
   }
 
-  const { data: project, error } = await supabase
-    .from('projects')
-    .insert({
-      owner_id: me.id,
-      slug,
-      title: data.title,
-      short_description: data.shortDescription,
-      description: data.fullDescription,
-      category: data.category,
-      stage: data.stage,
-      visibility: data.visibility,
-      remote_mode: data.remoteMode,
-      location: data.location ?? null,
-      weekly_commitment_min: data.weeklyCommitmentMin,
-      weekly_commitment_max: data.weeklyCommitmentMax,
-      github_url: data.githubUrl ?? null,
-      demo_url: data.demoUrl ?? null,
-      website_url: data.websiteUrl ?? null,
-      tags: data.tags,
-      status: 'ACTIVE',
-    })
-    .select('id, slug')
-    .single();
-  if (error) return { ok: false, error: error.message };
-
-  // Add owner as project member
-  await supabase.from('project_members').insert({
-    project_id: project.id,
-    user_id: me.id,
-    member_type: 'OWNER',
+  const project = createProject({
+    owner_id: me.id,
+    slug,
+    title: data.title,
+    short_description: data.shortDescription,
+    description: data.fullDescription,
+    category: data.category as never,
+    stage: data.stage as never,
+    visibility: data.visibility as never,
+    remote_mode: data.remoteMode as never,
+    location: data.location ?? null,
+    weekly_commitment_min: data.weeklyCommitmentMin,
+    weekly_commitment_max: data.weeklyCommitmentMax,
+    github_url: data.githubUrl ?? null,
+    demo_url: data.demoUrl ?? null,
+    website_url: data.websiteUrl ?? null,
+    tags: data.tags,
     status: 'ACTIVE',
   });
 
-  // Skills
+  addProjectMember(project.id, me.id, 'OWNER', 'Founder');
+
   if (data.requiredSkills.length) {
-    await supabase.from('project_skills').insert(
-      data.requiredSkills.map((skill) => ({ project_id: project.id, skill })),
-    );
+    setProjectSkills(project.id, data.requiredSkills);
   }
 
   // First project XP (idempotent)
-  const { data: myProjects } = await supabase
-    .from('projects')
-    .select('id')
-    .eq('owner_id', me.id);
-  if (myProjects && myProjects.length === 1) {
-    await awardXp(supabase as never, { userId: me.id, eventType: 'FIRST_PROJECT' });
+  const myProjects = listProjects({ ownerId: me.id, limit: 100 });
+  if (myProjects.length === 1) {
+    await awardXp(null, { userId: me.id, eventType: 'FIRST_PROJECT' });
   }
 
   revalidatePath('/projects');
@@ -117,7 +94,6 @@ export async function updateProjectAction(
   projectId: string,
   input: unknown,
 ): Promise<ProjectActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase is not configured.' };
   const me = await requireUser();
   const parsed = projectUpdateSchema.safeParse(input);
   if (!parsed.success) {
@@ -127,13 +103,7 @@ export async function updateProjectAction(
     }
     return { ok: false, error: 'Please fix the highlighted fields.', fieldErrors };
   }
-  const supabase = await createServerSupabase();
-  // Owner check
-  const { data: proj } = await supabase
-    .from('projects')
-    .select('owner_id')
-    .eq('id', projectId)
-    .single();
+  const proj = getProjectById(projectId);
   if (!proj || proj.owner_id !== me.id) return { ok: false, error: 'Not allowed.' };
   const data = parsed.data;
   const update: Record<string, unknown> = {};
@@ -151,18 +121,11 @@ export async function updateProjectAction(
   if (data.demoUrl !== undefined) update.demo_url = data.demoUrl ?? null;
   if (data.websiteUrl !== undefined) update.website_url = data.websiteUrl ?? null;
   if (data.tags !== undefined) update.tags = data.tags;
-  update.updated_at = new Date().toISOString();
 
-  const { error } = await supabase.from('projects').update(update).eq('id', projectId);
-  if (error) return { ok: false, error: error.message };
+  updateProject(projectId, update as never);
 
   if (data.requiredSkills !== undefined) {
-    await supabase.from('project_skills').delete().eq('project_id', projectId);
-    if (data.requiredSkills.length) {
-      await supabase
-        .from('project_skills')
-        .insert(data.requiredSkills.map((skill) => ({ project_id: projectId, skill })));
-    }
+    setProjectSkills(projectId, data.requiredSkills);
   }
   revalidatePath(`/projects/${projectId}`);
   return { ok: true };
@@ -174,32 +137,20 @@ export async function updateProjectAction(
 export async function markProjectShippedAction(
   projectId: string,
 ): Promise<ProjectActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase is not configured.' };
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const { data: proj } = await supabase
-    .from('projects')
-    .select('id, owner_id, status')
-    .eq('id', projectId)
-    .single();
+  const proj = getProjectById(projectId);
   if (!proj) return { ok: false, error: 'Project not found.' };
   if (proj.owner_id !== me.id) return { ok: false, error: 'Only the owner can ship.' };
   if (proj.status === 'COMPLETED') return { ok: true };
 
-  await supabase
-    .from('projects')
-    .update({ status: 'COMPLETED', stage: 'LAUNCHED', updated_at: new Date().toISOString() })
-    .eq('id', projectId);
+  updateProject(projectId, { status: 'COMPLETED', stage: 'LAUNCHED' } as never);
 
   // Award XP to every active member
-  const { data: members } = await supabase
-    .from('project_members')
-    .select('user_id')
-    .eq('project_id', projectId)
-    .eq('status', 'ACTIVE');
-  for (const m of members ?? []) {
-    await awardXp(supabase as never, {
-      userId: m.user_id as string,
+  const { db } = await import('@/lib/db/store');
+  const members = db.project_members.list({ project_id: projectId, status: 'ACTIVE' });
+  for (const m of members) {
+    await awardXp(null, {
+      userId: m.user_id,
       eventType: 'PROJECT_SHIPPED',
       entityType: 'project',
       entityId: projectId,

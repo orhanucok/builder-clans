@@ -10,18 +10,15 @@
  * because it amplifies early events.
  *
  * Formula:
- *   score = clamp( INITIAL * prior_weight + sum(delta * weight) )
- *                   / ( prior_weight + count )           → normalized to 0..100
+ *   score = ( INITIAL * prior_weight + sum(delta * weight) )
+ *                / ( prior_weight + count )              → normalized to 0..100
  *
  * This module is server-only.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { db, ensureSeeded } from '@/lib/db/store';
 import { REPUTATION } from '@/config/gamification';
 import type { ReputationSource } from '@/config/constants';
-import type { Database } from '@/types/database';
-
-type DB = SupabaseClient<Database>;
 
 export interface ReputationEventInput {
   userId: string;
@@ -34,9 +31,10 @@ export interface ReputationEventInput {
 }
 
 export async function applyReputationEvent(
-  supabase: DB,
+  _supabase: unknown,
   input: ReputationEventInput,
 ): Promise<{ newScore: number }> {
+  await ensureSeeded();
   const bounded = Math.max(
     REPUTATION.MIN,
     Math.min(REPUTATION.MAX, Math.round(input.delta * Math.max(0.1, input.weight))),
@@ -44,20 +42,18 @@ export async function applyReputationEvent(
 
   // Idempotency: if a (user, source, source_id) already exists, do not double-apply.
   if (input.sourceId) {
-    const { data: existing } = await supabase
-      .from('reputation_events')
-      .select('id')
-      .eq('user_id', input.userId)
-      .eq('source', input.source)
-      .eq('source_id', input.sourceId)
-      .maybeSingle();
+    const existing = db.reputation_events
+      .all()
+      .find(
+        (e) => e.user_id === input.userId && e.source === input.source && e.source_id === input.sourceId,
+      );
     if (existing) {
-      const score = await recomputeReputation(supabase, input.userId);
+      const score = await recomputeReputation(input.userId);
       return { newScore: score };
     }
   }
 
-  await supabase.from('reputation_events').insert({
+  db.reputation_events.insert({
     user_id: input.userId,
     source: input.source,
     source_id: input.sourceId ?? null,
@@ -65,9 +61,10 @@ export async function applyReputationEvent(
     delta: bounded,
     weight: input.weight,
     reason: input.reason,
+    created_at: new Date().toISOString(),
   });
 
-  const score = await recomputeReputation(supabase, input.userId);
+  const score = await recomputeReputation(input.userId);
   return { newScore: score };
 }
 
@@ -75,27 +72,20 @@ export async function applyReputationEvent(
  * Recompute reputation_score on the profile from the event log + prior.
  */
 export async function recomputeReputation(
-  supabase: DB,
+  _supabase: unknown,
   userId: string,
 ): Promise<number> {
-  const { data: events } = await supabase
-    .from('reputation_events')
-    .select('delta, weight')
-    .eq('user_id', userId);
-
-  const list = (events ?? []) as Array<{ delta: number; weight: number }>;
+  await ensureSeeded();
+  const events = db.reputation_events.all().filter((e) => e.user_id === userId);
   const prior = REPUTATION.INITIAL;
   const priorWeight = REPUTATION.SMOOTHING_PRIOR_WEIGHT;
-  const observedWeight = list.length;
+  const observedWeight = events.length;
   const totalWeight = priorWeight + observedWeight;
-  const observed = list.reduce((s, e) => s + (e.delta ?? 0) * (e.weight ?? 1), 0);
+  const observed = events.reduce((s, e) => s + (e.delta ?? 0) * (e.weight ?? 1), 0);
   const raw = (prior * priorWeight + observed) / Math.max(1, totalWeight);
   const score = Math.max(REPUTATION.MIN, Math.min(REPUTATION.MAX, Math.round(raw)));
 
-  await supabase
-    .from('profiles')
-    .update({ reputation_score: score })
-    .eq('id', userId);
+  db.profiles.update(userId, { reputation_score: score });
 
   return score;
 }

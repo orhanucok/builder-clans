@@ -3,9 +3,11 @@
  *
  * Responsibilities:
  *  1. Refresh the Supabase auth session for every request (so the user
- *     doesn't get logged out while the tab is open).
- *  2. Redirect unauthenticated requests on protected routes to /login
- *     with a `returnTo` param.
+ *     doesn't get logged out while the tab is open) when Supabase is
+ *     configured.
+ *  2. In demo mode (no Supabase env) check the demo session cookie and
+ *     redirect unauthenticated requests on protected routes to /login.
+ *  3. Redirect already-authenticated users away from /login and /signup.
  *
  * Note: route protection is also enforced server-side in every RSC and
  * server action. This middleware is a UX optimization, not a security
@@ -21,30 +23,44 @@ const PROTECTED_PREFIXES = [
   '/matches',
   '/trials',
   '/workspace',
-  '/people', // public profile view is OK; but `/people/.../edit` would be protected if added
+  '/people/edit',
   '/settings',
   '/notifications',
+  '/clans',
+  '/leaderboard',
 ];
 
 const isProtected = (pathname: string) =>
-  PROTECTED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
+  PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+
+const DEMO_SESSION_COOKIE = 'bc_demo_session';
+const DEMO_USER_COOKIE = 'bc_demo_user';
 
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-
-  // Only run on routes that need it.
   const needsAuth = isProtected(pathname);
 
-  // Quick env check: if Supabase is not configured, just let the request
-  // through. The (app) layout will render the demo mode UI.
+  // Check whether Supabase is configured
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   if (!url || !key) {
+    // Demo mode: gate on the demo session cookie
+    const sessionToken = request.cookies.get(DEMO_SESSION_COOKIE)?.value;
+    const userId = request.cookies.get(DEMO_USER_COOKIE)?.value;
+    const isAuthed = Boolean(sessionToken && userId);
+    if (needsAuth && !isAuthed) {
+      const redirectUrl = new URL('/login', request.url);
+      redirectUrl.searchParams.set('returnTo', `${pathname}${search}`);
+      return NextResponse.redirect(redirectUrl);
+    }
+    if (isAuthed && (pathname === '/login' || pathname === '/signup')) {
+      return NextResponse.redirect(new URL('/discover', request.url));
+    }
     return NextResponse.next({ request });
   }
 
+  // Supabase mode: refresh session and gate
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(url, key, {
@@ -65,7 +81,6 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // Refresh the session — this also returns the current user.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -76,7 +91,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // If the user is signed in and hits /login or /signup, send them to /discover.
   if (user && (pathname === '/login' || pathname === '/signup')) {
     return NextResponse.redirect(new URL('/discover', request.url));
   }
@@ -86,13 +100,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico
-     * - public files
-     */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

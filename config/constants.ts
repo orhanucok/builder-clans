@@ -370,6 +370,14 @@ export type ReportReason = (typeof REPORT_REASONS)[number];
 export const CLAN_TYPES = ['UNIVERSITY', 'COMMUNITY', 'RESEARCH', 'COMPANY', 'OPEN'] as const;
 export type ClanType = (typeof CLAN_TYPES)[number];
 
+export const CLAN_TYPE_LABELS: Record<ClanType, string> = {
+  UNIVERSITY: 'University',
+  COMMUNITY: 'Community',
+  RESEARCH: 'Research',
+  COMPANY: 'Company',
+  OPEN: 'Open',
+};
+
 export const CLAN_VISIBILITY = ['PUBLIC', 'REQUEST_TO_JOIN', 'INVITE_ONLY'] as const;
 export type ClanVisibility = (typeof CLAN_VISIBILITY)[number];
 

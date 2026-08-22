@@ -3,15 +3,17 @@ import { Plus, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { listProjects } from '@/lib/db/queries/projects';
 import { getCurrentUser } from '@/lib/auth/session';
-import { ProjectCard, type ProjectCardData } from '@/components/project/project-card';
+import { ProjectCard } from '@/components/project/project-card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { isSupabaseConfigured } from '@/lib/env';
+import { ensureSeeded } from '@/lib/db/store';
 
 export const metadata = { title: 'My projects' };
+export const dynamic = 'force-dynamic';
 
 export default async function MyProjectsPage() {
+  await ensureSeeded();
   const user = await getCurrentUser();
-  if (!isSupabaseConfigured() || !user) {
+  if (!user) {
     return (
       <div className="container-wide py-10">
         <EmptyState
@@ -59,7 +61,7 @@ export default async function MyProjectsPage() {
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {myProjects.map((p: ProjectCardData) => (
+          {myProjects.map((p) => (
             <ProjectCard key={p.id} data={p} />
           ))}
         </div>

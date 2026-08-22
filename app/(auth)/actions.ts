@@ -7,6 +7,7 @@ import { signInSchema, signUpSchema } from '@/lib/validation/schemas';
 import { getEnv } from '@/lib/env';
 import { rateLimit } from '@/lib/rate-limit';
 import { headers } from 'next/headers';
+import { signInAction as signInDemo, signUpAction as signUpDemo, signOutAction as signOutDemo } from '@/lib/auth/demo';
 
 export interface ActionResult {
   ok: boolean;
@@ -24,15 +25,16 @@ function getClientIp(): string {
 }
 
 /**
- * Sign in. Server action — used by the login form.
+ * Sign in. Dispatches to demo backend when Supabase isn't configured, so
+ * the app is fully usable in dev without external services.
  */
 export async function signInAction(input: z.input<typeof signInSchema>): Promise<ActionResult> {
+  if (!isSupabaseConfigured()) {
+    return signInDemo(input as Record<string, unknown>);
+  }
   const parsed = signInSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: 'Invalid input' };
-  }
-  if (!isSupabaseConfigured()) {
-    return { ok: false, error: 'Supabase is not configured. Add credentials in .env.local.' };
   }
   const rl = rateLimit(`signin:${getClientIp()}`, 10);
   if (!rl.allowed) {
@@ -48,10 +50,12 @@ export async function signInAction(input: z.input<typeof signInSchema>): Promise
 }
 
 /**
- * Sign up. Server action — used by the signup form. On success, ensures a
- * profile row exists for the new user.
+ * Sign up. Dispatches to demo backend when Supabase isn't configured.
  */
 export async function signUpAction(input: z.input<typeof signUpSchema>): Promise<ActionResult> {
+  if (!isSupabaseConfigured()) {
+    return signUpDemo(input as Record<string, unknown>);
+  }
   const parsed = signUpSchema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -60,9 +64,6 @@ export async function signUpAction(input: z.input<typeof signUpSchema>): Promise
       fieldErrors[k] = issue.message;
     }
     return { ok: false, error: 'Please fix the highlighted fields.', fieldErrors };
-  }
-  if (!isSupabaseConfigured()) {
-    return { ok: false, error: 'Supabase is not configured. Add credentials in .env.local.' };
   }
   const rl = rateLimit(`signup:${getClientIp()}`, 5);
   if (!rl.allowed) {
@@ -104,7 +105,10 @@ export async function signUpAction(input: z.input<typeof signUpSchema>): Promise
  * Sign out.
  */
 export async function signOutAction() {
-  if (!isSupabaseConfigured()) redirect('/');
+  if (!isSupabaseConfigured()) {
+    await signOutDemo();
+    return;
+  }
   const supabase = await createServerSupabase();
   await supabase.auth.signOut();
   redirect('/');

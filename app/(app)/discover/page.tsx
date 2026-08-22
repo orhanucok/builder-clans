@@ -6,11 +6,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Compass, Sparkles, Flame, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { isSupabaseConfigured } from '@/lib/env';
 import { getCurrentUser } from '@/lib/auth/session';
 import type { ProjectCategory, ProjectStage, RemoteMode } from '@/config/constants';
+import { ensureSeeded, db } from '@/lib/db/store';
 
 export const metadata = { title: 'Discover projects' };
+export const dynamic = 'force-dynamic';
 
 interface SearchParams {
   tab?: 'for-you' | 'new' | 'needs';
@@ -21,34 +22,48 @@ interface SearchParams {
 }
 
 export default async function DiscoverPage({ searchParams }: { searchParams: SearchParams }) {
+  await ensureSeeded();
   const tab = (searchParams.tab ?? 'for-you') as 'for-you' | 'new' | 'needs';
   const q = searchParams.q ?? null;
-  const supabaseReady = isSupabaseConfigured();
   const user = await getCurrentUser();
 
-  if (!supabaseReady || !user) {
-    return (
-      <div className="container-wide py-10">
-        <EmptyState
-          icon={<Compass className="h-10 w-10" />}
-          title="Discover is empty in demo mode"
-          description="Configure Supabase in .env.local and restart the dev server to load real projects."
-          action={
-            <Button asChild>
-              <Link href="/projects/new">Create a project</Link>
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
   // Pre-compute all three feeds so tabs switch instantly.
-  const [forYou, fresh, needs] = await Promise.all([
+  const [suggested, fresh, needs] = await Promise.all([
     suggestProjectsForCurrentUser(10).catch(() => []),
     listProjects({ query: q, limit: 30 }),
     listProjects({ needsTeammates: true, query: q, limit: 30 }),
   ]);
+
+  // For "For you" we already have full project rows; build cards with owner
+  const ownerIds = Array.from(new Set(suggested.map((p) => p.owner_id)));
+  const owners = (db.profiles.all() as any).filter((o) => ownerIds.includes(o.id));
+  const ownerMap = new Map(owners.map((o) => [o.id, o]));
+
+  const forYouCards: ProjectCardData[] = suggested.map((p) => {
+    const owner = ownerMap.get(p.owner_id);
+    return {
+      id: p.id,
+      slug: p.slug,
+      title: p.title,
+      shortDescription: p.short_description,
+      category: p.category,
+      stage: p.stage,
+      remoteMode: p.remote_mode,
+      location: p.location,
+      weeklyCommitmentMin: p.weekly_commitment_min,
+      weeklyCommitmentMax: p.weekly_commitment_max,
+      owner: {
+        displayName: owner?.display_name ?? 'Builder',
+        username: owner?.username ?? 'unknown',
+        avatarUrl: owner?.avatar_url ?? null,
+      },
+      memberCount: 1,
+      openRoleCount: 0,
+      openRoleTitles: [],
+      lookingFor: [],
+      tags: p.tags ?? [],
+    };
+  });
 
   return (
     <div className="container-wide py-8">
@@ -84,30 +99,23 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Sea
         </TabsList>
         <TabsContent value="for-you">
           <ProjectGrid
-            projects={forYou.map((p) => ({
-              id: p.id,
-              slug: p.slug,
-              title: p.title,
-              shortDescription: p.short_description,
-              category: p.category as ProjectCategory,
-              stage: p.stage as ProjectStage,
-              remoteMode: p.remote_mode as RemoteMode,
-              location: p.location,
-              weeklyCommitmentMin: p.weekly_commitment_min,
-              weeklyCommitmentMax: p.weekly_commitment_max,
-              owner: { displayName: 'Builder', username: 'unknown', avatarUrl: null },
-              memberCount: 1,
-              openRoleCount: 0,
-              openRoleTitles: [],
-              lookingFor: [],
-              tags: p.tags ?? [],
-            }))}
-            emptyTitle="No suggestions yet"
-            emptyDescription="Add skills to your profile and open a project role to get better recommendations."
+            projects={forYouCards}
+            emptyTitle={user ? 'No suggestions yet' : 'Log in to see personal suggestions'}
+            emptyDescription={
+              user
+                ? 'Add skills to your profile and open a project role to get better recommendations.'
+                : 'Sign in to get project suggestions based on your skills and interests.'
+            }
             emptyAction={
-              <Button asChild variant="outline">
-                <Link href="/settings">Edit profile</Link>
-              </Button>
+              user ? (
+                <Button asChild variant="outline">
+                  <Link href="/settings">Edit profile</Link>
+                </Button>
+              ) : (
+                <Button asChild>
+                  <Link href="/login">Log in</Link>
+                </Button>
+              )
             }
           />
         </TabsContent>

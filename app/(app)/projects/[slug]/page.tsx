@@ -12,7 +12,7 @@ import {
   Sparkles,
   Rocket,
 } from 'lucide-react';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
 import { getCurrentUser } from '@/lib/auth/session';
 import { resolveProjectPermissions } from '@/lib/permissions/checks';
 import { Button } from '@/components/ui/button';
@@ -36,89 +36,56 @@ import { ShipButton } from './ship-button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelative } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: { slug: string } }) {
   return { title: params.slug };
 }
 
 export default async function ProjectPage({ params }: { params: { slug: string } }) {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-narrow py-10 text-sm text-muted-foreground">
-        Configure Supabase to view this project.
-      </div>
-    );
-  }
+  await ensureSeeded();
   const user = await getCurrentUser();
-  const supabase = await createServerSupabase();
-  const { data: project } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('slug', params.slug)
-    .maybeSingle();
+  const project = db.projects.findOne((p) => p.slug === params.slug);
   if (!project) notFound();
 
   const perms = user
-    ? await resolveProjectPermissions(supabase, { userId: user.id }, project.id)
-    : { canView: project.visibility === 'PUBLIC', canEdit: false, canManageMembers: false, canManageRoles: false, canDelete: false, canCreateArtifacts: false, canCreateMilestones: false, canPostUpdates: false, memberType: null };
+    ? await resolveProjectPermissions(null, { userId: user.id }, project.id)
+    : {
+        canView: project.visibility === 'PUBLIC',
+        canEdit: false, canManageMembers: false, canManageRoles: false, canDelete: false,
+        canCreateArtifacts: false, canCreateMilestones: false, canPostUpdates: false, memberType: null,
+      };
   if (!perms.canView) {
     redirect('/login?returnTo=' + encodeURIComponent(`/projects/${params.slug}`));
   }
 
   // Owner profile
-  const { data: owner } = await supabase
-    .from('profiles')
-    .select('id, username, display_name, avatar_url, headline, reputation_score, builder_xp, builder_level')
-    .eq('id', project.owner_id)
-    .single();
+  const owner = db.profiles.get(project.owner_id);
 
   // Project skills
-  const { data: projectSkills } = await supabase
-    .from('project_skills')
-    .select('skill')
-    .eq('project_id', project.id);
-  const skills = (projectSkills ?? []).map((r) => r.skill as string);
+  const skills = db.project_skills.list({ project_id: project.id }).map((r) => (r as { skill: string }).skill);
 
   // Open roles
-  const { data: roles } = await supabase
-    .from('project_roles')
-    .select('*')
-    .eq('project_id', project.id)
-    .order('created_at', { ascending: false });
+  const roles = db.project_roles.list({ project_id: project.id });
 
   // Members
-  const { data: members } = await supabase
-    .from('project_members')
-    .select('user_id, member_type, status, role_title, joined_at')
-    .eq('project_id', project.id)
-    .eq('status', 'ACTIVE');
-
-  const memberUserIds = (members ?? []).map((m) => m.user_id as string);
-  const { data: memberProfiles } = memberUserIds.length
-    ? await supabase
-        .from('profiles')
-        .select('id, username, display_name, avatar_url, headline, reputation_score, builder_xp, builder_level')
-        .in('id', memberUserIds)
-    : { data: [] };
+  const members = db.project_members.list({ project_id: project.id, status: 'ACTIVE' });
+  const memberUserIds = members.map((m) => m.user_id);
+  const memberProfiles = memberUserIds.length
+    ? db.profiles.all().filter((p) => memberUserIds.includes(p.id))
+    : [];
 
   // Applications (only owner)
   const applications = perms.canEdit
-    ? (await supabase
-        .from('applications')
-        .select('id, applicant_id, role_id, why_interested, contribution, hours_per_week, note, status, created_at')
-        .eq('project_id', project.id)
-        .order('created_at', { ascending: false })).data ?? []
+    ? db.applications.list((a) => (a as { project_id: string }).project_id === project.id)
+    : [];
+  const applicantIds = applications.map((a) => (a as { applicant_id: string }).applicant_id);
+  const applicantProfiles = applicantIds.length
+    ? db.profiles.all().filter((p) => applicantIds.includes(p.id))
     : [];
 
-  const applicantIds = (applications as { applicant_id: string }[]).map((a) => a.applicant_id);
-  const { data: applicantProfiles } = applicantIds.length
-    ? await supabase
-        .from('profiles')
-        .select('id, username, display_name, avatar_url, headline')
-        .in('id', applicantIds)
-    : { data: [] };
-
   // Current user's relationship
-  const myMember = (members ?? []).find((m) => m.user_id === user?.id);
+  const myMember = members.find((m) => m.user_id === user?.id);
   const isOwner = user?.id === project.owner_id;
   const canApply = Boolean(user && !isOwner && !myMember && project.status === 'ACTIVE');
 
@@ -134,7 +101,7 @@ export default async function ProjectPage({ params }: { params: { slug: string }
               {project.location ? ` · ${project.location}` : null}
             </span>
             <span className="flex items-center gap-1">
-              <Users className="h-3 w-3" /> {(members?.length ?? 0) + 1} members
+              <Users className="h-3 w-3" /> {members.length + 1} members
             </span>
           </div>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">{project.title}</h1>
@@ -191,15 +158,15 @@ export default async function ProjectPage({ params }: { params: { slug: string }
 
           <Tabs defaultValue="roles">
             <TabsList>
-              <TabsTrigger value="roles">Open roles ({(roles ?? []).length})</TabsTrigger>
-              <TabsTrigger value="members">Members ({(members?.length ?? 0) + 1})</TabsTrigger>
+              <TabsTrigger value="roles">Open roles ({roles.length})</TabsTrigger>
+              <TabsTrigger value="members">Members ({members.length + 1})</TabsTrigger>
               {perms.canEdit ? (
-                <TabsTrigger value="applications">Applications ({(applications as { id: string }[]).length})</TabsTrigger>
+                <TabsTrigger value="applications">Applications ({applications.length})</TabsTrigger>
               ) : null}
             </TabsList>
             <TabsContent value="roles">
               <div className="space-y-3">
-                {(roles ?? []).length === 0 ? (
+                {roles.length === 0 ? (
                   <EmptyState
                     title="No open roles yet"
                     description="Add the first role to start finding collaborators."
@@ -216,7 +183,7 @@ export default async function ProjectPage({ params }: { params: { slug: string }
                       : {})}
                   />
                 ) : (
-                  (roles ?? []).map((r) => (
+                  roles.map((r) => (
                     <Card key={r.id}>
                       <CardContent className="space-y-3 p-5">
                         <div className="flex items-start justify-between gap-3">
@@ -271,17 +238,31 @@ export default async function ProjectPage({ params }: { params: { slug: string }
                 owner={
                   owner
                     ? {
-                        ...owner,
+                        id: owner.id,
+                        username: owner.username,
+                        display_name: owner.display_name,
+                        avatar_url: owner.avatar_url,
+                        headline: owner.headline,
+                        reputation_score: owner.reputation_score,
+                        builder_xp: owner.builder_xp,
+                        builder_level: owner.builder_level,
                         member_type: 'OWNER',
                         role_title: null,
-                        joined_at: project.created_at as string,
+                        joined_at: project.created_at,
                       }
                     : null
                 }
-                members={(memberProfiles ?? []).map((p) => {
-                  const m = (members ?? []).find((mm) => mm.user_id === p.id);
+                members={memberProfiles.map((p) => {
+                  const m = members.find((mm) => mm.user_id === p.id);
                   return {
-                    ...p,
+                    id: p.id,
+                    username: p.username,
+                    display_name: p.display_name,
+                    avatar_url: p.avatar_url,
+                    headline: p.headline,
+                    reputation_score: p.reputation_score,
+                    builder_xp: p.builder_xp,
+                    builder_level: p.builder_level,
                     member_type: m?.member_type ?? 'COLLABORATOR',
                     role_title: m?.role_title ?? null,
                     joined_at: m?.joined_at ?? null,
@@ -293,7 +274,10 @@ export default async function ProjectPage({ params }: { params: { slug: string }
               <TabsContent value="applications">
                 <ApplicationList
                   applications={applications as never}
-                  profiles={(applicantProfiles ?? []) as never}
+                  profiles={applicantProfiles.map((p) => ({
+                    id: p.id, username: p.username, display_name: p.display_name,
+                    avatar_url: p.avatar_url, headline: p.headline,
+                  })) as never}
                 />
               </TabsContent>
             ) : null}

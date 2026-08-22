@@ -1,32 +1,21 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded } from '@/lib/db/store';
+import { getProfileById, getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings' };
+export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-narrow py-10 text-sm text-muted-foreground">
-        Configure Supabase to edit your settings.
-      </div>
-    );
-  }
+  await ensureSeeded();
   const user = await getCurrentUser();
   if (!user) redirect('/login?returnTo=/settings');
-  const supabase = await createServerSupabase();
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+  const profile = getProfileById(user.id);
   if (!profile) redirect('/onboarding');
-  const [{ data: skills }, { data: interests }] = await Promise.all([
-    supabase.from('profile_skills').select('skill').eq('profile_id', user.id),
-    supabase.from('profile_interests').select('interest').eq('profile_id', user.id),
-  ]);
+  const skills = getProfileSkills(user.id);
+  const interests = getProfileInterests(user.id);
   return (
     <div className="container-narrow py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
@@ -51,8 +40,8 @@ export default async function SettingsPage() {
                 user_type: profile.user_type,
                 avatar_url: profile.avatar_url,
               }}
-              skills={(skills ?? []).map((s) => s.skill as string)}
-              interests={(interests ?? []).map((i) => i.interest as string)}
+              skills={skills}
+              interests={interests}
             />
           </CardContent>
         </Card>

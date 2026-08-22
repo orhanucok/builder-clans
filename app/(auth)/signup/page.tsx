@@ -9,13 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toaster';
 import { signUpAction } from '../actions';
-import { isSupabaseConfigured } from '@/lib/env';
 
 export default function SignupPage() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const { toast } = useToast();
-  const supabaseReady = isSupabaseConfigured();
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -47,12 +45,6 @@ export default function SignupPage() {
         <CardDescription>It takes a minute. We&apos;ll set up the rest.</CardDescription>
       </CardHeader>
       <CardContent>
-        {!supabaseReady && (
-          <div className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-            <strong>Demo mode:</strong> Supabase is not configured. Add credentials to{' '}
-            <code className="rounded bg-muted px-1">.env.local</code> to enable sign up.
-          </div>
-        )}
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <Label htmlFor="displayName">Display name</Label>
@@ -113,7 +105,7 @@ export default function SignupPage() {
             />
             {errors.password && <p className="mt-1 text-xs text-destructive">{errors.password}</p>}
           </div>
-          <Button type="submit" loading={pending} className="w-full" disabled={!supabaseReady}>
+          <Button type="submit" loading={pending} className="w-full">
             {pending ? 'Creating account…' : 'Create account'}
           </Button>
         </form>

@@ -5,22 +5,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { EmptyState } from '@/components/ui/empty-state';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
 import { getCurrentUser } from '@/lib/auth/session';
 import { formatRelative } from '@/lib/utils';
 import { MatchActions } from './match-actions';
 import type { MatchStatus } from '@/config/constants';
 
 export const metadata = { title: 'Matches' };
+export const dynamic = 'force-dynamic';
 
 export default async function MatchesPage() {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-wide py-10">
-        <EmptyState title="Demo mode" description="Configure Supabase to see matches." />
-      </div>
-    );
-  }
+  await ensureSeeded();
   const user = await getCurrentUser();
   if (!user) {
     return (
@@ -36,17 +31,15 @@ export default async function MatchesPage() {
       </div>
     );
   }
-  const supabase = await createServerSupabase();
 
-  // Matches where I'm the candidate (someone invited me or I applied) OR I'm the initiator.
-  const { data: matches } = await supabase
-    .from('matches')
-    .select('id, project_id, role_id, candidate_user_id, status, final_score, created_at, updated_at')
-    .or(`candidate_user_id.eq.${user.id},initiator_user_id.eq.${user.id}`)
-    .order('updated_at', { ascending: false })
-    .limit(50);
+  // Matches where I'm the candidate or I'm the initiator.
+  const matches = db.matches
+    .all()
+    .filter((m) => m.candidate_user_id === user.id || m.initiator_user_id === user.id)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .slice(0, 50);
 
-  if (!matches || matches.length === 0) {
+  if (matches.length === 0) {
     return (
       <div className="container-wide py-10">
         <EmptyState
@@ -64,21 +57,20 @@ export default async function MatchesPage() {
   }
 
   // Enrich with project + counterparty
-  const projectIds = Array.from(new Set(matches.map((m) => m.project_id as string)));
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id, slug, title, owner_id, short_description')
-    .in('id', projectIds);
-  const projectMap = new Map((projects ?? []).map((p) => [p.id, p]));
+  const projectIds = Array.from(new Set(matches.map((m) => m.project_id)));
+  const projects = (db.projects.all() as any).filter((p) => projectIds.includes(p.id));
+  const projectMap = new Map(projects.map((p) => [p.id, p]));
 
-  const ownerIds = Array.from(new Set((projects ?? []).map((p) => p.owner_id)));
-  const { data: ownerProfiles } = ownerIds.length
-    ? await supabase
-        .from('profiles')
-        .select('id, username, display_name, avatar_url')
-        .in('id', ownerIds)
-    : { data: [] };
-  const ownerMap = new Map((ownerProfiles ?? []).map((o) => [o.id, o]));
+  const ownerIds = Array.from(new Set(projects.map((p) => p.owner_id)));
+  const ownerProfiles = (db.profiles.all() as any).filter((o) => ownerIds.includes(o.id));
+  const ownerMap = new Map(ownerProfiles.map((o) => [o.id, o]));
+
+  // Counterparties: the "other side" of each match
+  const counterpartyIds = Array.from(new Set(
+    matches.map((m) => m.candidate_user_id === user.id ? m.initiator_user_id : m.candidate_user_id),
+  ));
+  const counterpartyProfiles = (db.profiles.all() as any).filter((p) => counterpartyIds.includes(p.id));
+  const counterpartiesMap = new Map(counterpartyProfiles.map((p) => [p.id, p]));
 
   return (
     <div className="container-wide py-8">
@@ -90,15 +82,20 @@ export default async function MatchesPage() {
       </header>
       <div className="space-y-3">
         {matches.map((m) => {
-          const p = projectMap.get(m.project_id as string);
-          const owner = p ? ownerMap.get(p.owner_id as string) : null;
+          const p = projectMap.get(m.project_id);
+          const owner = p ? ownerMap.get(p.owner_id) : null;
           return (
             <Card key={m.id}>
               <CardHeader>
                 <div className="flex items-center gap-3">
                   <Avatar className="h-9 w-9">
-                    {owner?.avatar_url ? <AvatarImage src={owner.avatar_url} /> : null}
-                    <AvatarFallback name={owner?.display_name ?? '?'} />
+                    {(m.candidate_user_id === user.id ? counterpartiesMap : owner ? null : null)?.avatar_url ? null : null}
+                    <AvatarFallback name={(() => {
+                      const iAmCandidate = m.candidate_user_id === user.id;
+                      const cid = iAmCandidate ? m.initiator_user_id : m.candidate_user_id;
+                      const c = counterpartiesMap.get(cid);
+                      return c?.display_name ?? owner?.display_name ?? '?';
+                    })()} />
                   </Avatar>
                   <div className="min-w-0 flex-1">
                     <CardTitle className="text-base">
@@ -109,10 +106,14 @@ export default async function MatchesPage() {
                     <p className="text-xs text-muted-foreground">
                       {m.candidate_user_id === user.id ? 'You matched with ' : 'You invited '}
                       <span className="font-medium text-foreground">
-                        {owner?.display_name ?? 'Unknown'}
+                        {(() => {
+                          const iAmCandidate = m.candidate_user_id === user.id;
+                          const cid = iAmCandidate ? m.initiator_user_id : m.candidate_user_id;
+                          return counterpartiesMap.get(cid)?.display_name ?? owner?.display_name ?? 'Unknown';
+                        })()}
                       </span>
                       {' · '}
-                      {formatRelative(m.updated_at as string)}
+                      {formatRelative(m.updated_at)}
                     </p>
                   </div>
                   <Badge
@@ -138,7 +139,7 @@ export default async function MatchesPage() {
                   matchId={m.id}
                   status={m.status as MatchStatus}
                   iAmCandidate={m.candidate_user_id === user.id}
-                  projectId={m.project_id as string}
+                  projectId={m.project_id}
                 />
               </CardContent>
             </Card>

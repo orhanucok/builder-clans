@@ -7,13 +7,15 @@
  * Output:
  *   - sorted list of { userId, breakdown, finalScore }.
  *
- * This is a server-only module. Calls supabase to fetch data, then runs
- * the deterministic scorer in config/matching.ts.
+ * Reads from the active data store (Supabase when configured, in-memory
+ * otherwise). The candidate scoring algorithm itself stays in
+ * config/matching.ts and is fully deterministic.
  */
 
 import { computeMatchScore, type MatchBreakdown, MATCH_HARD_FILTERS } from '@/config/matching';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
-import { requireUser } from '@/lib/auth/session';
+import { ensureSeeded, db } from '@/lib/db/store';
+import { getProjectSkills, getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
+import { getCurrentUser } from '@/lib/auth/session';
 
 export interface MatchCandidate {
   userId: string;
@@ -31,36 +33,6 @@ export interface MatchCandidate {
   breakdown: MatchBreakdown;
 }
 
-interface ProjectRow {
-  id: string;
-  owner_id: string;
-  remote_mode: string;
-  weekly_commitment_min: number;
-  weekly_commitment_max: number;
-  visibility: string;
-  tags: string[] | null;
-  category: string;
-}
-interface RoleRow {
-  id: string;
-  project_id: string;
-  title: string;
-  required_skills: string[] | null;
-  status: string;
-}
-interface ProfileRow {
-  id: string;
-  username: string;
-  display_name: string;
-  avatar_url: string | null;
-  headline: string | null;
-  user_type: string | null;
-  weekly_hours: string | null;
-  remote_preference: string | null;
-  reputation_score: number | null;
-  country_code: string | null;
-}
-
 /**
  * Generate ranked candidate list for a project role. Returns at most
  * `limit` candidates (default 25).
@@ -70,95 +42,49 @@ export async function generateCandidatesForRole(
   roleId: string | null,
   limit = 25,
 ): Promise<MatchCandidate[]> {
-  if (!isSupabaseConfigured()) return [];
-  const supabase = await createServerSupabase();
-  const me = await requireUser();
+  await ensureSeeded();
+  const me = await getCurrentUser();
 
-  // Fetch project
-  const { data: project, error: projectErr } = await supabase
-    .from('projects')
-    .select(
-      'id, owner_id, remote_mode, weekly_commitment_min, weekly_commitment_max, visibility, tags, category',
-    )
-    .eq('id', projectId)
-    .single();
-  if (projectErr || !project) return [];
-  const proj = project as ProjectRow;
-
-  // Fetch role
-  let role: RoleRow | null = null;
-  if (roleId) {
-    const { data: r } = await supabase
-      .from('project_roles')
-      .select('id, project_id, title, required_skills, status')
-      .eq('id', roleId)
-      .single();
-    role = (r as RoleRow | null) ?? null;
-  }
+  const project = db.projects.get(projectId);
+  if (!project) return [];
+  const role = roleId ? db.project_roles.get(roleId) : null;
 
   // Existing members
-  const { data: memberRows } = await supabase
-    .from('project_members')
-    .select('user_id')
-    .eq('project_id', projectId)
-    .eq('status', 'ACTIVE');
-  const excluded = new Set<string>([proj.owner_id, me.id]);
-  for (const m of memberRows ?? []) excluded.add(m.user_id as string);
+  const memberRows = db.project_members.list({ project_id: projectId, status: 'ACTIVE' });
+  const excluded = new Set<string>([project.owner_id]);
+  if (me) excluded.add(me.id);
+  for (const m of memberRows) excluded.add(m.user_id);
 
-  // Project required skills: from role + from project
-  const { data: projectSkillRows } = await supabase
-    .from('project_skills')
-    .select('skill')
-    .eq('project_id', projectId);
-  const projectSkills = (projectSkillRows ?? []).map((r) => r.skill as string);
+  const projectSkills = getProjectSkills(projectId);
   const roleSkills = role?.required_skills ?? [];
 
-  // Candidate pool: profiles with skills + interests loaded
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select(
-      'id, username, display_name, avatar_url, headline, user_type, weekly_hours, remote_preference, reputation_score, country_code',
-    )
-    .limit(500);
-  const profileList = (profiles ?? []) as ProfileRow[];
-
+  // Candidate pool: all profiles
+  const allProfiles = db.profiles.all();
   const candidates: MatchCandidate[] = [];
-  for (const p of profileList) {
+  for (const p of allProfiles) {
     if (excluded.has(p.id)) continue;
     if (MATCH_HARD_FILTERS.rejectExistingMembers && excluded.has(p.id)) continue;
     const rep = p.reputation_score ?? 50;
     if (rep < MATCH_HARD_FILTERS.minReputation) continue;
 
-    const { data: skillRows } = await supabase
-      .from('profile_skills')
-      .select('skill')
-      .eq('profile_id', p.id);
-    const candidateSkills = (skillRows ?? []).map((r) => r.skill as string);
-
-    const { data: interestRows } = await supabase
-      .from('profile_interests')
-      .select('interest')
-      .eq('profile_id', p.id);
-    const candidateInterests = (interestRows ?? []).map((r) => r.interest as string);
+    const candidateSkills = getProfileSkills(p.id);
+    const candidateInterests = getProfileInterests(p.id);
 
     const breakdown = computeMatchScore({
       candidateSkills,
       candidateInterests,
-      candidateAvailability: (p.weekly_hours ?? null) as never,
-      candidateRemote: (p.remote_preference ?? null) as never,
-      candidateUserType: (p.user_type ?? null) as never,
+      candidateAvailability: p.weekly_hours,
+      candidateRemote: p.remote_preference,
+      candidateUserType: p.user_type,
       candidateReputation: rep,
       projectRequiredSkills: projectSkills,
-      projectTags: proj.tags ?? [],
-      projectCommitmentMin: proj.weekly_commitment_min,
-      projectCommitmentMax: proj.weekly_commitment_max,
-      projectRemote: proj.remote_mode as 'REMOTE' | 'HYBRID' | 'ONSITE',
+      projectTags: project.tags ?? [],
+      projectCommitmentMin: project.weekly_commitment_min,
+      projectCommitmentMax: project.weekly_commitment_max,
+      projectRemote: project.remote_mode,
       roleTitle: role?.title ?? '',
       roleRequiredSkills: roleSkills,
-      sameCountry:
-        Boolean(p.country_code) &&
-        // naive same-country: requires a fetch from project owner; omitted for cost — assume different
-        false,
+      sameCountry: false,
       sameCity: false,
     });
 
@@ -188,44 +114,26 @@ export async function generateCandidatesForRole(
  * on the "Aha moment" CTA after onboarding.
  */
 export async function suggestProjectsForCurrentUser(limit = 10) {
-  if (!isSupabaseConfigured()) return [];
-  const supabase = await createServerSupabase();
-  const me = await requireUser();
+  await ensureSeeded();
+  const me = await getCurrentUser();
+  if (!me) return [];
 
-  const { data: myProfile } = await supabase
-    .from('profiles')
-    .select('id, user_type, weekly_hours, remote_preference, reputation_score')
-    .eq('id', me.id)
-    .single();
+  const myProfile = db.profiles.get(me.id);
   if (!myProfile) return [];
 
-  const { data: mySkills } = await supabase
-    .from('profile_skills')
-    .select('skill')
-    .eq('profile_id', me.id);
-  const mySkillSet = new Set((mySkills ?? []).map((r) => r.skill as string));
+  const mySkills = new Set(getProfileSkills(me.id));
 
-  const { data: openProjects } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('visibility', 'PUBLIC')
-    .neq('owner_id', me.id)
-    .neq('status', 'COMPLETED')
-    .order('created_at', { ascending: false })
-    .limit(50);
+  const openProjects = db.projects
+    .all()
+    .filter((p) => p.visibility === 'PUBLIC' && p.owner_id !== me.id && p.status !== 'COMPLETED')
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 50);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const list = (openProjects ?? []) as any[];
-  const out: Array<{ project: (typeof list)[number]; overlap: number }> = [];
-  for (const p of list) {
-    if (p.owner_id === me.id) continue;
-    const { data: ps } = await supabase
-      .from('project_skills')
-      .select('skill')
-      .eq('project_id', p.id);
-    const projSkills = (ps ?? []).map((r) => r.skill as string);
+  const out: Array<{ project: typeof openProjects[number]; overlap: number }> = [];
+  for (const p of openProjects) {
+    const projSkills = getProjectSkills(p.id);
     let overlap = 0;
-    for (const s of projSkills) if (mySkillSet.has(s)) overlap += 1;
+    for (const s of projSkills) if (mySkills.has(s)) overlap += 1;
     out.push({ project: p, overlap });
   }
   out.sort((a, b) => b.overlap - a.overlap);

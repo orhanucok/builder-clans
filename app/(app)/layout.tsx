@@ -12,27 +12,28 @@ export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
-  if (!user) {
-    // Allow demo access when Supabase is not configured.
-    if (!isSupabaseConfigured()) {
-      // Render the shell in demo mode; pages that need auth will soft-fail.
-    } else {
-      redirect('/login');
-    }
+  if (!user && isSupabaseConfigured()) {
+    redirect('/login');
   }
 
   const showSetupBanner = !isSupabaseConfigured();
+
+  // In demo mode, the (app) layout still renders for signed-in users.
+  // In Supabase mode, also requires a user.
+  const headerUser = user
+    ? {
+        displayName: user.displayName || 'Builder',
+        username: user.username || user.id.slice(0, 8),
+        avatarUrl: null as string | null,
+      }
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
       {showSetupBanner && <SetupBanner />}
       <div className="flex min-h-screen">
         <Sidebar
-          user={
-            user
-              ? { displayName: user.user.user_metadata?.display_name ?? 'Builder', username: user.user.user_metadata?.username ?? user.id.slice(0, 8) }
-              : null
-          }
+          user={headerUser}
           flags={{
             clans: isFeatureEnabled('CLANS'),
             leaderboard: isFeatureEnabled('LEADERBOARD'),
@@ -40,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           }}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar user={user ? { displayName: user.user.user_metadata?.display_name ?? 'Builder', username: user.user.user_metadata?.username ?? user.id.slice(0, 8), avatarUrl: null } : null} />
+          <Topbar user={headerUser} />
           <main className="flex-1 pb-16">{children}</main>
         </div>
       </div>

@@ -2,11 +2,15 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
+import {
+  getProjectById, createApplication, listApplicationsForProject, createMatch, getMatch, updateMatch,
+} from '@/lib/db/store/queries';
 import { z } from 'zod';
 import { projectRoleCreateSchema } from '@/lib/validation/schemas';
 import { canTransition, StatusMachines } from '@/config/transitions';
 import type { ApplicationStatus, MatchStatus } from '@/config/constants';
+import { createProjectRole } from '@/lib/db/store/queries';
 
 export interface ServerActionResult {
   ok: boolean;
@@ -16,8 +20,8 @@ export interface ServerActionResult {
 }
 
 const applySchema = z.object({
-  projectId: z.string().uuid(),
-  roleId: z.string().uuid().optional(),
+  projectId: z.string(),
+  roleId: z.string().optional(),
   whyInterested: z.string().max(1000).optional(),
   contribution: z.string().max(1000).optional(),
   hoursPerWeek: z.coerce.number().int().min(1).max(80),
@@ -31,57 +35,44 @@ const applySchema = z.object({
 export async function applyToProjectAction(
   input: z.input<typeof applySchema>,
 ): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
   const parsed = applySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
-  const supabase = await createServerSupabase();
 
   // Sanity: cannot apply to own project
-  const { data: project } = await supabase
-    .from('projects')
-    .select('id, owner_id, status')
-    .eq('id', data.projectId)
-    .single();
+  const project = getProjectById(data.projectId);
   if (!project) return { ok: false, error: 'Project not found.' };
   if (project.owner_id === me.id) return { ok: false, error: 'You cannot apply to your own project.' };
-  if (project.status !== 'ACTIVE') return { ok: false, error: 'Project is not accepting applications.' }
+  if (project.status !== 'ACTIVE') return { ok: false, error: 'Project is not accepting applications.' };
 
   // Check for an existing application
-  const { data: existing } = await supabase
-    .from('applications')
-    .select('id, status')
-    .eq('project_id', data.projectId)
-    .eq('applicant_id', me.id)
-    .maybeSingle();
+  const existing = listApplicationsForProject(data.projectId).find(
+    (a) => a.applicant_id === me.id,
+  );
   if (existing && existing.status === 'PENDING') {
     return { ok: false, error: 'You already have a pending application.' };
   }
 
-  const { error: appErr } = await supabase.from('applications').insert({
+  createApplication({
     project_id: data.projectId,
     role_id: data.roleId ?? null,
     applicant_id: me.id,
-    why_interested: data.whyInterested ?? null,
-    contribution: data.contribution ?? null,
+    why_interested: data.whyInterested,
+    contribution: data.contribution,
     hours_per_week: data.hoursPerWeek,
-    note: data.note ?? null,
-    status: 'PENDING',
+    note: data.note,
   });
-  if (appErr) return { ok: false, error: appErr.message };
 
   // Create a match row in APPLIED
-  const { error: matchErr } = await supabase.from('matches').insert({
+  createMatch({
     project_id: data.projectId,
     role_id: data.roleId ?? null,
     initiator_user_id: me.id,
-    candidate_user_id: me.id, // self-applied; owner is the other party
+    candidate_user_id: me.id,
     status: 'APPLIED',
   });
-  if (matchErr && !/duplicate/i.test(matchErr.message)) {
-    // soft-fail: application still created
-  }
 
   revalidatePath(`/projects/${data.projectId}`);
   revalidatePath('/matches');
@@ -89,9 +80,9 @@ export async function applyToProjectAction(
 }
 
 const inviteSchema = z.object({
-  projectId: z.string().uuid(),
-  roleId: z.string().uuid().optional(),
-  candidateUserId: z.string().uuid(),
+  projectId: z.string(),
+  roleId: z.string().optional(),
+  candidateUserId: z.string(),
 });
 
 /**
@@ -100,38 +91,27 @@ const inviteSchema = z.object({
 export async function inviteCandidateAction(
   input: z.input<typeof inviteSchema>,
 ): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
   const parsed = inviteSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
-  const supabase = await createServerSupabase();
 
-  const { data: project } = await supabase
-    .from('projects')
-    .select('id, owner_id, status')
-    .eq('id', data.projectId)
-    .single();
+  const project = getProjectById(data.projectId);
   if (!project) return { ok: false, error: 'Project not found.' };
   if (project.owner_id !== me.id) return { ok: false, error: 'Only the project owner can invite.' };
 
   // Upsert match row in INVITED status
-  const { data: existing } = await supabase
-    .from('matches')
-    .select('id, status')
-    .eq('project_id', data.projectId)
-    .eq('candidate_user_id', data.candidateUserId)
-    .maybeSingle();
+  const existing = (db.matches.all() as any).find(
+    (m) => m.project_id === data.projectId && m.candidate_user_id === data.candidateUserId,
+  );
   if (existing) {
     if (!canTransition<MatchStatus>(StatusMachines.match, existing.status as MatchStatus, 'INVITED')) {
       return { ok: false, error: `Match is in ${existing.status}, cannot invite.` };
     }
-    await supabase
-      .from('matches')
-      .update({ status: 'INVITED', role_id: data.roleId ?? null, updated_at: new Date().toISOString() })
-      .eq('id', existing.id);
+    updateMatch(existing.id, { status: 'INVITED', role_id: data.roleId ?? null } as never);
   } else {
-    await supabase.from('matches').insert({
+    createMatch({
       project_id: data.projectId,
       role_id: data.roleId ?? null,
       initiator_user_id: me.id,
@@ -149,64 +129,41 @@ export async function inviteCandidateAction(
  * Accept a match. Becomes MUTUAL.
  */
 export async function acceptMatchAction(matchId: string): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const { data: match } = await supabase
-    .from('matches')
-    .select('id, status, project_id, candidate_user_id')
-    .eq('id', matchId)
-    .single();
+  const match = getMatch(matchId);
   if (!match) return { ok: false, error: 'Match not found.' };
 
-  // Either party can accept for the match to be mutual.
-  // If the candidate accepts an INVITED, or the owner accepts an APPLIED,
-  // the match transitions to MUTUAL.
   const newStatus: MatchStatus = 'MUTUAL';
   if (!canTransition<MatchStatus>(StatusMachines.match, match.status as MatchStatus, newStatus)) {
     return { ok: false, error: `Cannot accept a ${match.status} match.` };
   }
-  // Authorization
-  if (me.id === match.candidate_user_id || true /* owner handled in separate action */) {
-    // ok
-  } else {
+  if (me.id !== match.candidate_user_id) {
     return { ok: false, error: 'Not allowed.' };
   }
-  await supabase
-    .from('matches')
-    .update({ status: newStatus, updated_at: new Date().toISOString() })
-    .eq('id', matchId);
+  updateMatch(matchId, { status: newStatus } as never);
   revalidatePath('/matches');
   revalidatePath(`/projects/${match.project_id}`);
   return { ok: true };
 }
 
 export async function declineMatchAction(matchId: string): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const { data: match } = await supabase
-    .from('matches')
-    .select('id, status, project_id, candidate_user_id')
-    .eq('id', matchId)
-    .single();
+  const match = getMatch(matchId);
   if (!match) return { ok: false, error: 'Match not found.' };
-  if (me.id !== match.candidate_user_id) {
-    // Owners can also decline on behalf of the project
-    const { data: proj } = await supabase
-      .from('projects')
-      .select('owner_id')
-      .eq('id', match.project_id)
-      .single();
-    if (proj?.owner_id !== me.id) return { ok: false, error: 'Not allowed.' };
+
+  let allowed = me.id === match.candidate_user_id;
+  if (!allowed) {
+    const proj = getProjectById(match.project_id);
+    if (proj?.owner_id === me.id) allowed = true;
   }
+  if (!allowed) return { ok: false, error: 'Not allowed.' };
+
   if (!canTransition<MatchStatus>(StatusMachines.match, match.status as MatchStatus, 'DECLINED')) {
     return { ok: false, error: `Cannot decline a ${match.status} match.` };
   }
-  await supabase
-    .from('matches')
-    .update({ status: 'DECLINED', updated_at: new Date().toISOString() })
-    .eq('id', matchId);
+  updateMatch(matchId, { status: 'DECLINED' } as never);
   revalidatePath('/matches');
   return { ok: true };
 }
@@ -216,42 +173,29 @@ export async function declineMatchAction(matchId: string): Promise<ServerActionR
 // ---------------------------------------------------------------------------
 
 const decideSchema = z.object({
-  applicationId: z.string().uuid(),
+  applicationId: z.string(),
   decision: z.enum(['ACCEPTED', 'REJECTED']),
 });
 
 export async function decideApplicationAction(
   input: z.input<typeof decideSchema>,
 ): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
   const parsed = decideSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const supabase = await createServerSupabase();
-  const { data: app } = await supabase
-    .from('applications')
-    .select('id, status, project_id, applicant_id')
-    .eq('id', input.applicationId)
-    .single();
+  const app = db.applications.get(input.applicationId);
   if (!app) return { ok: false, error: 'Application not found.' };
   if (!canTransition<ApplicationStatus>(StatusMachines.application, app.status as ApplicationStatus, parsed.data.decision)) {
     return { ok: false, error: `Cannot ${parsed.data.decision.toLowerCase()} a ${app.status} application.` };
   }
-  // Owner check
-  const { data: proj } = await supabase
-    .from('projects')
-    .select('owner_id')
-    .eq('id', app.project_id)
-    .single();
+  const proj = getProjectById(app.project_id);
   if (proj?.owner_id !== me.id) return { ok: false, error: 'Only the owner can decide.' };
 
-  await supabase
-    .from('applications')
-    .update({
-      status: parsed.data.decision,
-      decided_at: new Date().toISOString(),
-    })
-    .eq('id', input.applicationId);
+  db.applications.update(input.applicationId, {
+    status: parsed.data.decision,
+    decided_at: new Date().toISOString(),
+  } as never);
   revalidatePath(`/projects/${app.project_id}`);
   return { ok: true };
 }
@@ -261,38 +205,27 @@ export async function decideApplicationAction(
 // ---------------------------------------------------------------------------
 
 const createRoleSchema = projectRoleCreateSchema.extend({
-  projectId: z.string().uuid(),
+  projectId: z.string(),
 });
 
 export async function createProjectRoleAction(
   input: z.input<typeof createRoleSchema>,
 ): Promise<ServerActionResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
   const parsed = createRoleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const supabase = await createServerSupabase();
-  const { data: proj } = await supabase
-    .from('projects')
-    .select('owner_id')
-    .eq('id', parsed.data.projectId)
-    .single();
+  const proj = getProjectById(parsed.data.projectId);
   if (proj?.owner_id !== me.id) return { ok: false, error: 'Only the owner can create roles.' };
-  const { data, error } = await supabase
-    .from('project_roles')
-    .insert({
-      project_id: parsed.data.projectId,
-      title: parsed.data.title,
-      description: parsed.data.description ?? null,
-      commitment_min: parsed.data.commitmentMin,
-      commitment_max: parsed.data.commitmentMax,
-      experience_level: parsed.data.experienceLevel,
-      required_skills: parsed.data.requiredSkills,
-      status: 'OPEN',
-    })
-    .select('id')
-    .single();
-  if (error) return { ok: false, error: error.message };
+  const role = createProjectRole({
+    project_id: parsed.data.projectId,
+    title: parsed.data.title,
+    description: parsed.data.description ?? undefined,
+    commitment_min: parsed.data.commitmentMin,
+    commitment_max: parsed.data.commitmentMax,
+    experience_level: parsed.data.experienceLevel as string,
+    required_skills: parsed.data.requiredSkills,
+  });
   revalidatePath(`/projects/${parsed.data.projectId}`);
-  return { ok: true, id: data?.id };
+  return { ok: true, id: role.id };
 }

@@ -3,7 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
+import {
+  getProjectById, listTasksForProject, listMilestones, listProjectUpdates,
+  createTask, updateTask, getTask, createMilestone, updateMilestone, getTask as _,
+  createProjectUpdate, createArtifact, getProjectById as __,
+  listProjectMembers,
+} from '@/lib/db/store/queries';
 import { resolveProjectPermissions } from '@/lib/permissions/checks';
 import {
   taskCreateSchema,
@@ -29,60 +35,45 @@ export async function createTaskAction(
   projectId: string,
   input: z.input<typeof taskCreateSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, projectId);
+  const proj = getProjectById(projectId);
+  if (!proj) return { ok: false, error: 'Project not found.' };
+  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   const parsed = taskCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert({
-      project_id: projectId,
-      milestone_id: parsed.data.milestoneId ?? null,
-      title: parsed.data.title,
-      description: parsed.data.description ?? null,
-      status: parsed.data.status,
-      priority: parsed.data.priority,
-      assignee_id: parsed.data.assigneeId ?? null,
-      due_date: parsed.data.dueDate ? parsed.data.dueDate.toISOString() : null,
-      created_by: me.id,
-    })
-    .select('id')
-    .single();
-  if (error) return { ok: false, error: error.message };
+  const task = createTask({
+    project_id: projectId,
+    title: parsed.data.title,
+    description: parsed.data.description,
+    priority: parsed.data.priority,
+    assignee_id: parsed.data.assigneeId,
+    due_date: parsed.data.dueDate ? parsed.data.dueDate.toISOString() : undefined,
+    created_by: me.id,
+  });
   revalidatePath(`/workspace/${projectId}`);
-  return { ok: true, id: data?.id };
+  return { ok: true, id: task.id };
 }
 
 const taskStatusSchema = z.object({
-  taskId: z.string().uuid(),
+  taskId: z.string(),
   status: z.enum(['TODO', 'IN_PROGRESS', 'DONE', 'BLOCKED']),
 });
 
 export async function setTaskStatusAction(input: z.input<typeof taskStatusSchema>): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
   const parsed = taskStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { data: task } = await supabase
-    .from('tasks')
-    .select('project_id, status, assignee_id')
-    .eq('id', parsed.data.taskId)
-    .single();
+  const task = getTask(parsed.data.taskId);
   if (!task?.project_id) return { ok: false, error: 'Task not found.' };
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, task.project_id as string);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, task.project_id);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   if (!canTransition<TaskStatus>(StatusMachines.task, task.status as TaskStatus, parsed.data.status)) {
     return { ok: false, error: `Cannot move from ${task.status} to ${parsed.data.status}.` };
   }
-  const { error } = await supabase
-    .from('tasks')
-    .update({ status: parsed.data.status, updated_at: new Date().toISOString() })
-    .eq('id', parsed.data.taskId);
-  if (error) return { ok: false, error: error.message };
+  updateTask(parsed.data.taskId, { status: parsed.data.status } as never);
   revalidatePath(`/workspace/${task.project_id}`);
   return { ok: true };
 }
@@ -93,72 +84,51 @@ export async function createMilestoneAction(
   projectId: string,
   input: z.input<typeof milestoneCreateSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, projectId);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
   if (!perms.canCreateMilestones) return { ok: false, error: 'Not allowed.' };
   const parsed = milestoneCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { data, error } = await supabase
-    .from('milestones')
-    .insert({
-      project_id: projectId,
-      title: parsed.data.title,
-      description: parsed.data.description ?? null,
-      target_date: parsed.data.targetDate ? parsed.data.targetDate.toISOString() : null,
-      status: parsed.data.status,
-    })
-    .select('id')
-    .single();
-  if (error) return { ok: false, error: error.message };
+  const ms = createMilestone({
+    project_id: projectId,
+    title: parsed.data.title,
+    description: parsed.data.description,
+    target_date: parsed.data.targetDate ? parsed.data.targetDate.toISOString() : undefined,
+  });
   revalidatePath(`/workspace/${projectId}`);
-  return { ok: true, id: data?.id };
+  return { ok: true, id: ms.id };
 }
 
 const milestoneStatusSchema = z.object({
-  milestoneId: z.string().uuid(),
+  milestoneId: z.string(),
   status: z.enum(['PLANNED', 'IN_PROGRESS', 'COMPLETED', 'BLOCKED', 'CANCELLED']),
 });
 
 export async function setMilestoneStatusAction(
   input: z.input<typeof milestoneStatusSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
   const parsed = milestoneStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { data: ms } = await supabase
-    .from('milestones')
-    .select('project_id, status')
-    .eq('id', parsed.data.milestoneId)
-    .single();
+  const ms = db.milestones.get(parsed.data.milestoneId);
   if (!ms?.project_id) return { ok: false, error: 'Milestone not found.' };
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, ms.project_id as string);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, ms.project_id);
   if (!perms.canCreateMilestones) return { ok: false, error: 'Not allowed.' };
   if (!canTransition<MilestoneStatus>(StatusMachines.milestone, ms.status as MilestoneStatus, parsed.data.status)) {
     return { ok: false, error: `Cannot move from ${ms.status} to ${parsed.data.status}.` };
   }
   const isComplete = parsed.data.status === 'COMPLETED';
-  const { error } = await supabase
-    .from('milestones')
-    .update({
-      status: parsed.data.status,
-      completed_at: isComplete ? new Date().toISOString() : null,
-    })
-    .eq('id', parsed.data.milestoneId);
-  if (error) return { ok: false, error: error.message };
-  // Award XP if newly completed
+  updateMilestone(parsed.data.milestoneId, {
+    status: parsed.data.status,
+    completed_at: isComplete ? new Date().toISOString() : null,
+  } as never);
   if (isComplete && ms.status !== 'COMPLETED') {
-    const { data: members } = await supabase
-      .from('project_members')
-      .select('user_id')
-      .eq('project_id', ms.project_id)
-      .eq('status', 'ACTIVE');
-    for (const m of members ?? []) {
-      await awardXp(supabase as never, {
-        userId: m.user_id as string,
+    const members = listProjectMembers(ms.project_id).filter((m) => m.status === 'ACTIVE');
+    for (const m of members) {
+      await awardXp(null, {
+        userId: m.user_id,
         eventType: 'MILESTONE_COMPLETED',
         entityType: 'milestone',
         entityId: parsed.data.milestoneId,
@@ -175,57 +145,37 @@ export async function postProjectUpdateAction(
   projectId: string,
   input: z.input<typeof projectUpdateCreateSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, projectId);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
   if (!perms.canPostUpdates) return { ok: false, error: 'Not allowed.' };
   const parsed = projectUpdateCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { error } = await supabase.from('project_updates').insert({
+  createProjectUpdate({
     project_id: projectId,
     author_id: me.id,
     body: parsed.data.body,
     visibility: parsed.data.visibility,
   });
-  if (error) return { ok: false, error: error.message };
   revalidatePath(`/workspace/${projectId}`);
   return { ok: true };
 }
 
 export async function generateWeeklySummaryAction(projectId: string): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
-  const supabase = await createServerSupabase();
-  const { data: project } = await supabase
-    .from('projects')
-    .select('id, title')
-    .eq('id', projectId)
-    .single();
+  await ensureSeeded();
+  const project = getProjectById(projectId);
   if (!project) return { ok: false, error: 'Project not found.' };
-  const { data: updates } = await supabase
-    .from('project_updates')
-    .select('body, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(5);
-  const { data: tasks } = await supabase
-    .from('tasks')
-    .select('status')
-    .eq('project_id', projectId);
-  const tasksTotal = tasks?.length ?? 0;
-  const tasksCompleted = (tasks ?? []).filter((t) => t.status === 'DONE').length;
-  const { data: milestones } = await supabase
-    .from('milestones')
-    .select('title, status')
-    .eq('project_id', projectId);
+  const updates = listProjectUpdates(projectId).slice(0, 5);
+  const tasks = listTasksForProject(projectId);
+  const milestones = listMilestones(projectId);
+  const tasksTotal = tasks.length;
+  const tasksCompleted = tasks.filter((t) => t.status === 'DONE').length;
   const text = await aiWeeklySummary({
-    projectTitle: project.title as string,
-    recentUpdates: ((updates ?? []) as Array<{ body: string; created_at: string }>).map(
-      (u) => ({ body: u.body, createdAt: u.created_at }),
-    ),
+    projectTitle: project.title,
+    recentUpdates: updates.map((u) => ({ body: u.body, createdAt: u.created_at })),
     tasksCompleted,
     tasksTotal,
-    milestones: (milestones ?? []) as Array<{ title: string; status: string }>,
+    milestones: milestones.map((m) => ({ title: m.title, status: m.status })),
   });
   return { ok: true, id: text };
 }
@@ -236,22 +186,20 @@ export async function createArtifactAction(
   projectId: string,
   input: z.input<typeof artifactCreateSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, projectId);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
   if (!perms.canCreateArtifacts) return { ok: false, error: 'Not allowed.' };
   const parsed = artifactCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const { error } = await supabase.from('artifacts').insert({
+  createArtifact({
     project_id: projectId,
     title: parsed.data.title,
     type: parsed.data.type,
     url: parsed.data.url,
-    description: parsed.data.description ?? null,
+    description: parsed.data.description,
     creator_id: me.id,
   });
-  if (error) return { ok: false, error: error.message };
   revalidatePath(`/workspace/${projectId}`);
   return { ok: true };
 }
@@ -261,31 +209,24 @@ export async function createArtifactAction(
 export async function recordContributionAction(
   input: z.input<typeof contributionCreateSchema>,
 ): Promise<WsResult> {
-  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase not configured.' };
+  await ensureSeeded();
   const me = await requireUser();
-  const supabase = await createServerSupabase();
-  const perms = await resolveProjectPermissions(supabase, { userId: me.id }, input.projectId);
+  const perms = resolveProjectPermissions(db, { userId: me.id }, input.projectId);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   const parsed = contributionCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  // Verified by the project owner (or self if solo for the demo).
-  const { data: proj } = await supabase
-    .from('projects')
-    .select('owner_id')
-    .eq('id', input.projectId)
-    .single();
-  const verifiedBy = proj?.owner_id && proj.owner_id !== me.id ? (proj.owner_id as string) : null;
-  const { error } = await supabase.from('contributions').insert({
+  const proj = getProjectById(input.projectId);
+  const verifiedBy = proj?.owner_id && proj.owner_id !== me.id ? proj.owner_id : null;
+  createContribution({
     user_id: me.id,
     project_id: input.projectId,
     type: input.type,
     description: input.description,
-    evidence_url: input.evidenceUrl ?? null,
-    verified_by: verifiedBy,
+    evidence_url: input.evidenceUrl,
+    verified_by: verifiedBy ?? undefined,
   });
-  if (error) return { ok: false, error: error.message };
   if (verifiedBy) {
-    await awardXp(supabase as never, {
+    await awardXp(null, {
       userId: me.id,
       eventType: 'VERIFIED_CONTRIBUTION',
       entityType: 'contribution',
@@ -294,4 +235,38 @@ export async function recordContributionAction(
   }
   revalidatePath(`/workspace/${input.projectId}`);
   return { ok: true };
+}
+
+import {
+  createContribution, createMessage, listMessages, getOrCreateProjectChannel,
+} from '@/lib/db/store/queries';
+
+// Chat (project channel)
+
+const sendChatSchema = z.object({
+  projectId: z.string(),
+  content: z.string().min(1).max(2000),
+});
+
+export async function sendChatMessageAction(input: z.input<typeof sendChatSchema>): Promise<WsResult> {
+  await ensureSeeded();
+  const me = await requireUser();
+  const perms = resolveProjectPermissions(db, { userId: me.id }, input.projectId);
+  if (!perms.canView) return { ok: false, error: 'Not allowed.' };
+  const parsed = sendChatSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'Invalid input' };
+  const channel = getOrCreateProjectChannel(parsed.data.projectId, 'general');
+  const msg = createMessage({ channel_id: channel.id, sender_id: me.id, content: parsed.data.content });
+  revalidatePath(`/workspace/${parsed.data.projectId}`);
+  return { ok: true, id: msg.id };
+}
+
+export async function listChatMessagesAction(projectId: string, limit = 200) {
+  await ensureSeeded();
+  const me = await requireUser();
+  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  if (!perms.canView) return [];
+  const channel = db.channels.findOne((c) => (c as { project_id: string | null }).project_id === projectId);
+  if (!channel) return [];
+  return listMessages(channel.id, limit);
 }

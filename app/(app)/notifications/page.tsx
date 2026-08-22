@@ -1,22 +1,18 @@
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth/session';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded } from '@/lib/db/store';
+import { listNotificationsForUser } from '@/lib/db/store/queries';
 import { Card, CardContent } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { formatRelative } from '@/lib/utils';
 
 export const metadata = { title: 'Notifications' };
+export const dynamic = 'force-dynamic';
 
 export default async function NotificationsPage() {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-narrow py-10">
-        <EmptyState title="Demo mode" description="Configure Supabase to see notifications." />
-      </div>
-    );
-  }
+  await ensureSeeded();
   const user = await getCurrentUser();
   if (!user) {
     return (
@@ -32,15 +28,9 @@ export default async function NotificationsPage() {
       </div>
     );
   }
-  const supabase = await createServerSupabase();
-  const { data: notes } = await supabase
-    .from('notifications')
-    .select('id, type, title, body, link, read_at, created_at')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(50);
+  const notes = listNotificationsForUser(user.id, { limit: 50 });
 
-  if (!notes || notes.length === 0) {
+  if (notes.length === 0) {
     return (
       <div className="container-narrow py-10">
         <EmptyState
@@ -60,17 +50,17 @@ export default async function NotificationsPage() {
           <Card key={n.id} className={n.read_at ? '' : 'border-foreground/20'}>
             <CardContent className="flex items-start gap-3 p-4">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{n.title as string}</p>
+                <p className="text-sm font-medium">{n.title}</p>
                 {n.body ? (
-                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{n.body as string}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
                 ) : null}
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {formatRelative(n.created_at as string)}
+                  {formatRelative(n.created_at)}
                 </p>
               </div>
               {n.link ? (
                 <Button asChild variant="outline" size="sm">
-                  <Link href={n.link as string}>Open</Link>
+                  <Link href={n.link}>Open</Link>
                 </Button>
               ) : null}
             </CardContent>

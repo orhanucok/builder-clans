@@ -17,8 +17,10 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toaster';
 import { Plus, Send } from 'lucide-react';
-import { createBrowserSupabase } from '@/lib/db/supabase-browser';
-import { isSupabaseConfigured } from '@/lib/env';
+import {
+  addTrialTaskAction, setTrialTaskStatusAction, setTrialTaskAssigneeAction,
+  sendTrialMessageAction, listTrialMessagesAction,
+} from '@/app/(app)/matches/trial-actions';
 import { cn, formatRelative } from '@/lib/utils';
 
 type TaskRow = {
@@ -93,38 +95,29 @@ function TaskBoard({ trialId, projectId, tasks, canCreateTask, members }: TrialT
 
   function addTask() {
     if (!draft.trim()) return;
+    const title = draft.trim();
+    setDraft('');
+    setAdding(false);
     startTransition(async () => {
-      const supabase = createBrowserSupabase();
-      const { error } = await supabase.from('tasks').insert({
-        trial_id: trialId,
-        project_id: projectId,
-        title: draft.trim(),
-        status: 'TODO',
-        priority: 'MEDIUM',
-        created_by: (await supabase.auth.getUser()).data.user?.id ?? '',
-      });
-      if (error) {
-        toast({ title: 'Could not add task', description: error.message, variant: 'error' });
+      const res = await addTrialTaskAction({ trialId, projectId, title, priority: 'MEDIUM' });
+      if (!res.ok) {
+        toast({ title: 'Could not add task', description: res.error, variant: 'error' });
         return;
       }
-      setDraft('');
-      setAdding(false);
       router.refresh();
     });
   }
 
   function setStatus(taskId: string, status: TaskRow['status']) {
     startTransition(async () => {
-      const supabase = createBrowserSupabase();
-      await supabase.from('tasks').update({ status }).eq('id', taskId);
+      await setTrialTaskStatusAction({ taskId, status });
       router.refresh();
     });
   }
 
   function assign(taskId: string, assigneeId: string | null) {
     startTransition(async () => {
-      const supabase = createBrowserSupabase();
-      await supabase.from('tasks').update({ assignee_id: assigneeId }).eq('id', taskId);
+      await setTrialTaskAssigneeAction({ taskId, assigneeId });
       router.refresh();
     });
   }
@@ -213,9 +206,7 @@ function TaskBoard({ trialId, projectId, tasks, canCreateTask, members }: TrialT
                             <button
                               key={c.key}
                               onClick={() => setStatus(t.id, c.key)}
-                              className={cn(
-                                'rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent',
-                              )}
+                              className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent"
                             >
                               → {c.label}
                             </button>
@@ -244,49 +235,27 @@ interface Message {
   created_at: string;
 }
 
-function ChatPanel({ channelId, currentUserId, canPost, members }: TrialTabsProps) {
+function ChatPanel({ trialId, channelId, currentUserId, canPost, members }: TrialTabsProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [pending, startTransition] = useTransition();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
+  // Polling-based chat: every 4 seconds, refresh messages
   useEffect(() => {
-    if (!channelId || !isSupabaseConfigured()) return;
-    const supabase = createBrowserSupabase();
+    if (!channelId) return;
     let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('messages')
-        .select('id, content, sender_id, created_at')
-        .eq('channel_id', channelId)
-        .order('created_at', { ascending: true })
-        .limit(200);
-      if (!cancelled && data) {
-        setMessages(data as Message[]);
-        setLoading(false);
-      } else if (!cancelled) {
-        setLoading(false);
-      }
-    })();
-
-    // Realtime
-    const sub = supabase
-      .channel(`trial-chat:${channelId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `channel_id=eq.${channelId}` },
-        (payload) => {
-          setMessages((m) => [...m, payload.new as Message]);
-        },
-      )
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      sub.unsubscribe();
+    const load = async () => {
+      const list = await listTrialMessagesAction(trialId, 200);
+      if (cancelled) return;
+      setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
+      setLoading(false);
     };
-  }, [channelId]);
+    load();
+    const t = setInterval(load, 4000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [channelId, trialId]);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
@@ -297,15 +266,14 @@ function ChatPanel({ channelId, currentUserId, canPost, members }: TrialTabsProp
     const text = draft.trim();
     setDraft('');
     startTransition(async () => {
-      const supabase = createBrowserSupabase();
-      await supabase.from('messages').insert({
-        channel_id: channelId,
-        content: text,
-        sender_id: currentUserId,
-        reply_to: null,
-        edited_at: null,
-        deleted_at: null,
-      });
+      const res = await sendTrialMessageAction({ channelId, content: text });
+      if (!res.ok) {
+        toast({ title: 'Could not send', description: res.error, variant: 'error' });
+        return;
+      }
+      // Re-fetch
+      const list = await listTrialMessagesAction(trialId, 200);
+      setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
     });
   }
 
@@ -337,9 +305,7 @@ function ChatPanel({ channelId, currentUserId, canPost, members }: TrialTabsProp
                   >
                     <p className="text-[10px] font-semibold text-muted-foreground">
                       {sender?.display_name ?? 'Unknown'}{' '}
-                      <span className="font-normal opacity-70">
-                        · {formatRelative(m.created_at)}
-                      </span>
+                      <span className="font-normal opacity-70">· {formatRelative(m.created_at)}</span>
                     </p>
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   </div>

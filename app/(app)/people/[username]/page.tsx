@@ -1,16 +1,14 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { MapPin, GraduationCap, Star } from 'lucide-react';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
+import { getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import {
-  levelProgress,
-  publicReputationLabel,
-} from '@/config/gamification';
+import { levelProgress, publicReputationLabel } from '@/config/gamification';
 import {
   USER_TYPE_LABELS,
   WEEKLY_HOURS_LABELS,
@@ -24,83 +22,31 @@ import {
 import { ProjectCard, type ProjectCardData } from '@/components/project/project-card';
 import { formatRelative } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: { username: string } }) {
   return { title: `@${params.username}` };
 }
 
 export default async function ProfilePage({ params }: { params: { username: string } }) {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-narrow py-10 text-sm text-muted-foreground">
-        Configure Supabase to view profiles.
-      </div>
-    );
-  }
-  const supabase = await createServerSupabase();
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('username', params.username)
-    .maybeSingle();
+  await ensureSeeded();
+  const profile = db.profiles.findOne((p) => p.username === params.username);
   if (!profile) notFound();
 
-  // Skills, interests
-  const [{ data: skills }, { data: interests }, { data: ownedProjects }, { data: memberProjects }] =
-    await Promise.all([
-      supabase.from('profile_skills').select('skill').eq('profile_id', profile.id),
-      supabase.from('profile_interests').select('interest').eq('profile_id', profile.id),
-      supabase
-        .from('projects')
-        .select(
-          'id, slug, title, short_description, category, stage, remote_mode, location, weekly_commitment_min, weekly_commitment_max, tags, status, created_at, owner_id',
-        )
-        .eq('owner_id', profile.id)
-        .order('created_at', { ascending: false })
-        .limit(20),
-      supabase
-        .from('project_members')
-        .select('project_id, status')
-        .eq('user_id', profile.id)
-        .eq('status', 'ACTIVE'),
-    ]);
+  const skills = getProfileSkills(profile.id);
+  const interests = getProfileInterests(profile.id);
+  const ownedRaw = db.projects.list({ ownerId: profile.id, limit: 20 });
+  const memberProjects = db.project_members.list({ user_id: profile.id, status: 'ACTIVE' });
+  const memberProjectIds = memberProjects.map((m) => m.project_id);
+  const contributedRaw = memberProjectIds.length
+    ? db.projects.all().filter((p) => memberProjectIds.includes(p.id) && p.owner_id !== profile.id).slice(0, 20)
+    : [];
 
-  // Project list decorated (for owned projects)
-  const ownedDecorated: ProjectCardData[] = await decorateProjects(
-    supabase,
-    (ownedProjects ?? []) as never,
-    profile.display_name as string,
-    profile.username as string,
-    profile.avatar_url as string | null,
-  );
+  const ownedDecorated = decorateProjects(ownedRaw, profile.display_name, profile.username, profile.avatar_url);
+  const contributedDecorated = decorateProjects(contributedRaw, profile.display_name, profile.username, profile.avatar_url);
 
-  // Contributed projects
-  const memberProjectIds = (memberProjects ?? []).map((m) => m.project_id as string);
-  const { data: contributedRaw } = memberProjectIds.length
-    ? await supabase
-        .from('projects')
-        .select(
-          'id, slug, title, short_description, category, stage, remote_mode, location, weekly_commitment_min, weekly_commitment_max, tags, status, created_at, owner_id',
-        )
-        .in('id', memberProjectIds)
-        .neq('owner_id', profile.id)
-        .order('created_at', { ascending: false })
-        .limit(20)
-    : { data: [] };
-  const contributedDecorated: ProjectCardData[] = await decorateProjects(
-    supabase,
-    (contributedRaw ?? []) as never,
-    profile.display_name as string,
-    profile.username as string,
-    profile.avatar_url as string | null,
-  );
-
-  // Verified contributions
-  const { data: contribs } = await supabase
-    .from('contributions')
-    .select('id, project_id, type, description, evidence_url, created_at')
-    .eq('user_id', profile.id)
-    .order('created_at', { ascending: false })
-    .limit(20);
+  const contribs = db.contributions.list((c) => (c as { user_id: string }).user_id === profile.id)
+    .slice().sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 20);
 
   const xp = profile.builder_xp ?? 0;
   const level = levelProgress(xp);
@@ -111,24 +57,24 @@ export default async function ProfilePage({ params }: { params: { username: stri
       <header className="mb-8 grid gap-4 md:grid-cols-[auto_1fr_auto] md:items-center">
         <Avatar className="h-20 w-20">
           {profile.avatar_url ? <AvatarImage src={profile.avatar_url} /> : null}
-          <AvatarFallback name={profile.display_name as string} />
+          <AvatarFallback name={profile.display_name} />
         </Avatar>
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{profile.display_name as string}</h1>
-          <p className="text-sm text-muted-foreground">@{profile.username as string}</p>
+          <h1 className="text-3xl font-semibold tracking-tight">{profile.display_name}</h1>
+          <p className="text-sm text-muted-foreground">@{profile.username}</p>
           {profile.headline ? (
-            <p className="mt-1 text-pretty text-sm text-foreground/80">{profile.headline as string}</p>
+            <p className="mt-1 text-pretty text-sm text-foreground/80">{profile.headline}</p>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {profile.user_type ? <Badge variant="muted">{USER_TYPE_LABELS[profile.user_type as UserType]}</Badge> : null}
             {profile.institution ? (
               <span className="flex items-center gap-1">
-                <GraduationCap className="h-3 w-3" /> {profile.institution as string}
+                <GraduationCap className="h-3 w-3" /> {profile.institution}
               </span>
             ) : null}
             {profile.location ? (
               <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> {profile.location as string}
+                <MapPin className="h-3 w-3" /> {profile.location}
               </span>
             ) : null}
             {profile.weekly_hours ? (
@@ -151,9 +97,7 @@ export default async function ProfilePage({ params }: { params: { username: stri
           <CardContent className="p-4">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Builder Level</span>
-              <span>
-                L{level.current} → L{level.nextLevel}
-              </span>
+              <span>L{level.current} → L{level.nextLevel}</span>
             </div>
             <Progress value={Math.round(level.progress * 100)} tone="xp" className="mt-2" />
             <p className="mt-1 text-xs text-muted-foreground">
@@ -195,7 +139,7 @@ export default async function ProfilePage({ params }: { params: { username: stri
             <TabsList>
               <TabsTrigger value="built">Built ({ownedDecorated.length})</TabsTrigger>
               <TabsTrigger value="contributing">Contributing ({contributedDecorated.length})</TabsTrigger>
-              <TabsTrigger value="contributions">Contributions ({(contribs ?? []).length})</TabsTrigger>
+              <TabsTrigger value="contributions">Contributions ({contribs.length})</TabsTrigger>
             </TabsList>
             <TabsContent value="built">
               {ownedDecorated.length === 0 ? (
@@ -220,27 +164,20 @@ export default async function ProfilePage({ params }: { params: { username: stri
               )}
             </TabsContent>
             <TabsContent value="contributions">
-              {(contribs ?? []).length === 0 ? (
+              {contribs.length === 0 ? (
                 <Empty title="No contributions yet" description="Contributions are recorded on project tasks, artifacts, and trials." />
               ) : (
                 <div className="space-y-2">
-                  {(contribs ?? []).map((c) => (
+                  {contribs.map((c) => (
                     <Card key={c.id}>
                       <CardContent className="space-y-1 p-4">
                         <div className="flex items-center justify-between">
-                          <Badge variant="muted">{c.type as string}</Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {formatRelative(c.created_at as string)}
-                          </span>
+                          <Badge variant="muted">{c.type}</Badge>
+                          <span className="text-xs text-muted-foreground">{formatRelative(c.created_at)}</span>
                         </div>
-                        <p className="text-sm">{c.description as string}</p>
+                        <p className="text-sm">{c.description}</p>
                         {c.evidence_url ? (
-                          <Link
-                            href={c.evidence_url as string}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-foreground hover:underline"
-                          >
+                          <Link href={c.evidence_url} target="_blank" rel="noopener noreferrer" className="text-xs text-foreground hover:underline">
                             Evidence →
                           </Link>
                         ) : null}
@@ -260,13 +197,11 @@ export default async function ProfilePage({ params }: { params: { username: stri
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-1.5">
-                {(skills ?? []).length === 0 ? (
+                {skills.length === 0 ? (
                   <span className="text-xs text-muted-foreground">No skills listed.</span>
                 ) : (
-                  (skills ?? []).map((s) => (
-                    <Badge key={s.skill as string} variant="muted">
-                      {s.skill as string}
-                    </Badge>
+                  skills.map((s) => (
+                    <Badge key={s} variant="muted">{s}</Badge>
                   ))
                 )}
               </div>
@@ -278,13 +213,11 @@ export default async function ProfilePage({ params }: { params: { username: stri
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-1.5">
-                {(interests ?? []).length === 0 ? (
+                {interests.length === 0 ? (
                   <span className="text-xs text-muted-foreground">No interests listed.</span>
                 ) : (
-                  (interests ?? []).map((s) => (
-                    <Badge key={s.interest as string} variant="trial">
-                      {s.interest as string}
-                    </Badge>
+                  interests.map((s) => (
+                    <Badge key={s} variant="trial">{s}</Badge>
                   ))
                 )}
               </div>
@@ -316,43 +249,25 @@ function Empty({ title, description }: { title: string; description?: string }) 
   );
 }
 
-async function decorateProjects(
-  supabase: Awaited<ReturnType<typeof createServerSupabase>>,
-  list: Array<{
-    id: string;
-    slug: string;
-    title: string;
-    short_description: string;
-    category: string;
-    stage: string;
-    remote_mode: string;
-    location: string | null;
-    weekly_commitment_min: number;
-    weekly_commitment_max: number;
-    tags: string[] | null;
-    status: string;
-    created_at: string;
-    owner_id: string;
-  }>,
+function decorateProjects(
+  list: ReturnType<typeof db.projects.all>,
   ownerName: string,
   ownerUsername: string,
   ownerAvatar: string | null,
-): Promise<ProjectCardData[]> {
+): ProjectCardData[] {
   if (list.length === 0) return [];
-  const ids = list.map((p) => p.id);
-  const [{ data: members }, { data: roles }] = await Promise.all([
-    supabase.from('project_members').select('project_id').in('project_id', ids).eq('status', 'ACTIVE'),
-    supabase.from('project_roles').select('project_id, title, status').in('project_id', ids).eq('status', 'OPEN'),
-  ]);
+  const ids = new Set(list.map((p) => p.id));
+  const members = db.project_members.all().filter((m) => ids.has(m.project_id) && m.status === 'ACTIVE');
   const memberCount = new Map<string, number>();
-  for (const m of members ?? []) {
-    memberCount.set(m.project_id as string, (memberCount.get(m.project_id as string) ?? 0) + 1);
+  for (const m of members) {
+    memberCount.set(m.project_id, (memberCount.get(m.project_id) ?? 0) + 1);
   }
+  const roles = db.project_roles.all().filter((r) => ids.has(r.project_id) && r.status === 'OPEN');
   const roleMap = new Map<string, string[]>();
-  for (const r of roles ?? []) {
-    const arr = roleMap.get(r.project_id as string) ?? [];
-    arr.push(r.title as string);
-    roleMap.set(r.project_id as string, arr);
+  for (const r of roles) {
+    const arr = roleMap.get(r.project_id) ?? [];
+    arr.push(r.title);
+    roleMap.set(r.project_id, arr);
   }
   return list.map((p) => ({
     id: p.id,

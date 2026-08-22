@@ -6,6 +6,11 @@ import { requireUser } from '@/lib/auth/session';
 import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
 import { onboardingSchema } from '@/lib/validation/schemas';
 import { awardXp } from '@/lib/xp/award';
+import { completeOnboardingAction as completeOnboardingDemo } from '@/lib/auth/demo';
+import {
+  updateProfile, setProfileSkills, setProfileInterests, recordXpEvent,
+} from '@/lib/db/store/queries';
+import { CANONICAL_SKILLS } from '@/config/matching';
 
 export interface OnboardingResult {
   ok: boolean;
@@ -17,7 +22,7 @@ export async function completeOnboardingAction(
   input: z.input<typeof onboardingSchema>,
 ): Promise<OnboardingResult> {
   if (!isSupabaseConfigured()) {
-    return { ok: false, error: 'Supabase is not configured.' };
+    return completeOnboardingDemo(input as Record<string, unknown>);
   }
   const me = await requireUser();
   const parsed = onboardingSchema.safeParse(input);
@@ -62,7 +67,6 @@ export async function completeOnboardingAction(
     );
   }
 
-  // Award XP for completing profile (idempotent)
   await awardXp(supabase as never, {
     userId: me.id,
     eventType: 'PROFILE_COMPLETE',

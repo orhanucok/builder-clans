@@ -4,21 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { createServerSupabase, isSupabaseConfigured } from '@/lib/db/supabase';
+import { ensureSeeded, db } from '@/lib/db/store';
 import { getCurrentUser } from '@/lib/auth/session';
 import { formatRelative } from '@/lib/utils';
 import type { TrialStatus } from '@/config/constants';
 
 export const metadata = { title: 'Trials' };
+export const dynamic = 'force-dynamic';
 
 export default async function TrialsPage() {
-  if (!isSupabaseConfigured()) {
-    return (
-      <div className="container-wide py-10">
-        <EmptyState title="Demo mode" description="Configure Supabase to see trials." />
-      </div>
-    );
-  }
+  await ensureSeeded();
   const user = await getCurrentUser();
   if (!user) {
     return (
@@ -34,14 +29,13 @@ export default async function TrialsPage() {
       </div>
     );
   }
-  const supabase = await createServerSupabase();
   // trials where I'm a member
-  const { data: myMemberships } = await supabase
-    .from('trial_members')
-    .select('trial_id')
-    .eq('user_id', user.id);
-  const ids = (myMemberships ?? []).map((m) => m.trial_id as string);
-  if (ids.length === 0) {
+  const myMemberships = db.trial_members.list({ user_id: user.id });
+  const ids = new Set(myMemberships.map((m) => (m as { trial_id: string }).trial_id));
+  const trials = (db.trials.all() as any)
+    .filter((t) => ids.has(t.id) || t.owner_id === user.id)
+    .sort((a, b) => b.starts_at.localeCompare(a.starts_at));
+  if (trials.length === 0) {
     return (
       <div className="container-wide py-10">
         <EmptyState
@@ -57,17 +51,10 @@ export default async function TrialsPage() {
       </div>
     );
   }
-  const { data: trials } = await supabase
-    .from('trials')
-    .select('id, project_id, status, goal, duration_days, starts_at, ends_at')
-    .in('id', ids)
-    .order('starts_at', { ascending: false });
 
-  const projectIds = Array.from(new Set((trials ?? []).map((t) => t.project_id as string)));
-  const { data: projects } = projectIds.length
-    ? await supabase.from('projects').select('id, slug, title').in('id', projectIds)
-    : { data: [] };
-  const projectMap = new Map((projects ?? []).map((p) => [p.id, p]));
+  const projectIds = Array.from(new Set(trials.map((t) => t.project_id)));
+  const projects = (db.projects.all() as any).filter((p) => projectIds.includes(p.id));
+  const projectMap = new Map(projects.map((p) => [p.id, p]));
 
   return (
     <div className="container-wide py-8">
@@ -78,8 +65,8 @@ export default async function TrialsPage() {
         </p>
       </header>
       <div className="space-y-3">
-        {(trials ?? []).map((t) => {
-          const p = projectMap.get(t.project_id as string);
+        {trials.map((t) => {
+          const p = projectMap.get(t.project_id);
           return (
             <Card key={t.id}>
               <CardHeader>
@@ -98,9 +85,7 @@ export default async function TrialsPage() {
                         ? 'trial'
                         : t.status === 'SUCCESSFUL'
                           ? 'success'
-                          : t.status === 'ENDED' || t.status === 'EXPIRED'
-                            ? 'muted'
-                            : 'muted'
+                          : 'muted'
                     }
                   >
                     {t.status as TrialStatus}
@@ -110,7 +95,7 @@ export default async function TrialsPage() {
               <CardContent className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
-                  {t.duration_days}-day sprint · started {formatRelative(t.starts_at as string)}
+                  {t.duration_days}-day sprint · started {formatRelative(t.starts_at)}
                 </span>
                 <Button asChild size="sm" variant="outline">
                   <Link href={`/trials/${t.id}`}>Open</Link>
