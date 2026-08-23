@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Bell, LogOut, Search, Settings, User } from 'lucide-react';
+import { LogOut, Search, Settings, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -15,12 +15,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { signOutAction } from '@/app/(auth)/actions';
+import { NotificationBell, type NotificationSummary } from './notification-bell';
 
 interface TopbarProps {
   user: { displayName: string; username: string; avatarUrl: string | null } | null;
+  notifications: NotificationSummary[];
+  unreadCount: number;
 }
 
-export function Topbar({ user }: TopbarProps) {
+export function Topbar({ user, notifications, unreadCount }: TopbarProps) {
   const [search, setSearch] = useState('');
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/60 bg-background/80 px-4 backdrop-blur md:px-6">
@@ -28,7 +31,6 @@ export function Topbar({ user }: TopbarProps) {
         className="flex w-full max-w-md items-center"
         onSubmit={(e) => {
           e.preventDefault();
-          // basic search → /discover
           window.location.href = `/discover?q=${encodeURIComponent(search)}`;
         }}
       >
@@ -44,11 +46,11 @@ export function Topbar({ user }: TopbarProps) {
         </div>
       </form>
       <div className="ml-auto flex items-center gap-1">
-        <Button asChild variant="ghost" size="icon" aria-label="Notifications">
-          <Link href="/notifications">
-            <Bell className="h-4 w-4" />
-          </Link>
-        </Button>
+        <NotificationBell
+          initialNotifications={notifications}
+          initialUnreadCount={unreadCount}
+          isAuthenticated={Boolean(user)}
+        />
         {user ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -77,6 +79,15 @@ export function Topbar({ user }: TopbarProps) {
                 <Link href="/settings" className="flex items-center gap-2">
                   <Settings className="h-3.5 w-3.5" />
                   <span>Settings</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/api/dev/login?email=defne@builderclans.dev&next=/discover"
+                  className="flex items-center gap-2"
+                >
+                  <User className="h-3.5 w-3.5" />
+                  <span>Switch persona (demo)</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

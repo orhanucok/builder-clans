@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { MapPin, GraduationCap, Star } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
 import { getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
+import { getCurrentUser } from '@/lib/auth/session';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -30,8 +31,10 @@ export async function generateMetadata({ params }: { params: { username: string 
 
 export default async function ProfilePage({ params }: { params: { username: string } }) {
   await ensureSeeded();
+  const me = await getCurrentUser();
   const profile = db.profiles.findOne((p) => p.username === params.username);
   if (!profile) notFound();
+  const isMe = Boolean(me && me.id === profile.id);
 
   const skills = getProfileSkills(profile.id);
   const interests = getProfileInterests(profile.id);
@@ -60,7 +63,14 @@ export default async function ProfilePage({ params }: { params: { username: stri
           <AvatarFallback name={profile.display_name} />
         </Avatar>
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{profile.display_name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-semibold tracking-tight">{profile.display_name}</h1>
+            {isMe ? (
+              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                You
+              </span>
+            ) : null}
+          </div>
           <p className="text-sm text-muted-foreground">@{profile.username}</p>
           {profile.headline ? (
             <p className="mt-1 text-pretty text-sm text-foreground/80">{profile.headline}</p>
@@ -91,6 +101,27 @@ export default async function ProfilePage({ params }: { params: { username: stri
           <Stat label="XP" value={xp.toLocaleString()} />
         </div>
       </header>
+
+      {isMe ? (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card/40 p-3 text-sm">
+          <span className="font-medium">This is your profile.</span>
+          <Link
+            href="/settings"
+            className="rounded-md border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent"
+          >
+            Edit profile
+          </Link>
+          <button
+            type="button"
+            onClick={undefined}
+            data-share-url={`/people/${profile.username}`}
+            className="rounded-md border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent"
+          >
+            Copy link
+          </button>
+          <span className="text-xs text-muted-foreground">Public link: <code>/people/{profile.username}</code></span>
+        </div>
+      ) : null}
 
       <div className="mb-6 grid gap-3 md:grid-cols-3">
         <Card>

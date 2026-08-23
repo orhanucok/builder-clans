@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `No demo user with email ${email}` }, { status: 404 });
   }
   const token = auth.createSession(user.id);
-  const res = NextResponse.redirect(new URL('/discover', req.url));
+  const res = NextResponse.redirect(new URL(req.nextUrl.searchParams.get('next') ?? '/discover', req.url));
   const weekSeconds = 60 * 60 * 24 * 7;
   res.cookies.set('bc_demo_session', token, {
     httpOnly: true, sameSite: 'lax', path: '/', maxAge: weekSeconds, secure: false,
