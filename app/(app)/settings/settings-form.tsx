@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ImageUpload } from '@/components/ui/image-upload';
 import { useToast } from '@/components/ui/toaster';
 import { updateProfileAction } from './actions';
 import {
@@ -136,6 +137,30 @@ export function SettingsForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <div className="flex items-start gap-4">
+        <ImageUpload
+          value={form.avatarUrl || null}
+          onChange={(url) => setForm({ ...form, avatarUrl: url ?? '' })}
+          alt={form.displayName}
+          shape="circle"
+        />
+        <div className="flex-1 space-y-1.5">
+          <Label>Profile picture</Label>
+          <p className="text-xs text-muted-foreground">
+            Drag &amp; drop or click to upload. PNG, JPG, WebP, GIF, or SVG. Max 2 MB.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Or paste a URL below.
+          </p>
+          <Input
+            value={form.avatarUrl.startsWith('data:') ? '' : form.avatarUrl}
+            onChange={(e) => setForm({ ...form, avatarUrl: e.target.value })}
+            className="mt-2"
+            placeholder="https://…"
+          />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <Label>Display name</Label>
@@ -179,15 +204,6 @@ export function SettingsForm({
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div>
-          <Label>Avatar URL (optional)</Label>
-          <Input
-            value={form.avatarUrl}
-            onChange={(e) => setForm({ ...form, avatarUrl: e.target.value })}
-            className="mt-1"
-            placeholder="https://…"
-          />
         </div>
       </div>
       <div>

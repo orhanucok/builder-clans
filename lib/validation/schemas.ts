@@ -94,6 +94,7 @@ export const projectCreateSchema = z.object({
   githubUrl: urlSchema,
   demoUrl: urlSchema,
   websiteUrl: urlSchema,
+  coverImageUrl: z.union([z.string().url(), z.string().startsWith('data:image/')]).optional().or(z.literal('')),
   tags: z.array(z.string().min(1).max(30)).max(15).default([]),
   requiredSkills: z.array(z.string().min(1).max(40)).max(15).default([]),
 });

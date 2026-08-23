@@ -240,21 +240,63 @@ function ChatPanel({ trialId, channelId, currentUserId, canPost, members }: Tria
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [pending, startTransition] = useTransition();
+  const { toast } = useToast();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
-  // Polling-based chat: every 4 seconds, refresh messages
+  // Real-time via SSE, with polling fallback.
   useEffect(() => {
     if (!channelId) return;
     let cancelled = false;
+    let es: EventSource | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
     const load = async () => {
       const list = await listTrialMessagesAction(trialId, 200);
       if (cancelled) return;
       setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
       setLoading(false);
     };
+
+    const startPolling = () => {
+      if (pollTimer) return;
+      pollTimer = setInterval(load, 4000);
+    };
+    const stopPolling = () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+
     load();
-    const t = setInterval(load, 4000);
-    return () => { cancelled = true; clearInterval(t); };
+
+    if (typeof window !== 'undefined' && 'EventSource' in window) {
+      try {
+        es = new EventSource(`/api/chat/${channelId}/events`);
+        es.addEventListener('message', (ev) => {
+          try {
+            const msg = JSON.parse((ev as MessageEvent).data);
+            setMessages((cur) => {
+              if (cur.some((m) => m.id === msg.id)) return cur;
+              return [...cur, { id: msg.id, content: msg.content, sender_id: msg.sender_id, created_at: msg.created_at }];
+            });
+          } catch { /* ignore parse */ }
+        });
+        es.addEventListener('ready', () => setLoading(false));
+        es.addEventListener('error', () => {
+          // SSE failed (proxy, server, etc) — fall back to polling.
+          if (es) { es.close(); es = null; }
+          startPolling();
+        });
+      } catch {
+        startPolling();
+      }
+    } else {
+      startPolling();
+    }
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+      if (es) { es.close(); es = null; }
+    };
   }, [channelId, trialId]);
 
   useEffect(() => {
@@ -271,9 +313,8 @@ function ChatPanel({ trialId, channelId, currentUserId, canPost, members }: Tria
         toast({ title: 'Could not send', description: res.error, variant: 'error' });
         return;
       }
-      // Re-fetch
-      const list = await listTrialMessagesAction(trialId, 200);
-      setMessages(list.map((m) => ({ id: m.id, content: m.content, sender_id: m.sender_id, created_at: m.created_at })));
+      // The SSE stream will deliver the new message to all subscribers,
+      // including us. No need to re-fetch.
     });
   }
 

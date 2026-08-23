@@ -28,14 +28,27 @@ export interface ProjectCardData {
   memberCount: number;
   openRoleCount: number;
   openRoleTitles: string[];
+  lookingFor: string[];
   tags: string[];
   matchScore?: number;
-  lookingFor?: string[];
+  coverImageUrl?: string | null;
 }
 
 export function ProjectCard({ data }: { data: ProjectCardData }) {
   return (
-    <Card className="group h-full transition-shadow hover:border-border hover:shadow-md">
+    <Card className="group h-full overflow-hidden transition-shadow hover:border-border hover:shadow-md">
+      {data.coverImageUrl ? (
+        <Link href={`/projects/${data.slug}`} className="block">
+          <div className="relative h-32 w-full overflow-hidden bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={data.coverImageUrl}
+              alt={data.title}
+              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+            />
+          </div>
+        </Link>
+      ) : null}
       <CardHeader className="space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">

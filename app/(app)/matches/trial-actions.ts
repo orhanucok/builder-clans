@@ -13,6 +13,7 @@ import {
   createTrial, getMatch, getProjectById, updateMatch, addTrialMember, createTask,
   getOrCreateTrialChannel, createTrialReview, updateTask, createMessage, listMessages,
 } from '@/lib/db/store/queries';
+import { emitMessage } from '@/lib/db/store/messaging';
 
 export interface TrialActionResult {
   ok: boolean;
@@ -363,6 +364,7 @@ export async function sendTrialMessageAction(input: z.input<typeof sendMessageSc
     sender_id: me.id,
     content: parsed.data.content,
   });
+  emitMessage(message);
   revalidatePath(`/trials/${channel.trial_id}`);
   return { ok: true, id: message.id };
 }

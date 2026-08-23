@@ -69,6 +69,7 @@ export async function createProjectAction(input: unknown): Promise<ProjectAction
     github_url: data.githubUrl ?? null,
     demo_url: data.demoUrl ?? null,
     website_url: data.websiteUrl ?? null,
+    cover_image_url: data.coverImageUrl || null,
     tags: data.tags,
     status: 'ACTIVE',
   });

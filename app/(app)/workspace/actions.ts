@@ -240,6 +240,7 @@ export async function recordContributionAction(
 import {
   createContribution, createMessage, listMessages, getOrCreateProjectChannel,
 } from '@/lib/db/store/queries';
+import { emitMessage } from '@/lib/db/store/messaging';
 
 // Chat (project channel)
 
@@ -257,6 +258,7 @@ export async function sendChatMessageAction(input: z.input<typeof sendChatSchema
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const channel = getOrCreateProjectChannel(parsed.data.projectId, 'general');
   const msg = createMessage({ channel_id: channel.id, sender_id: me.id, content: parsed.data.content });
+  emitMessage(msg);
   revalidatePath(`/workspace/${parsed.data.projectId}`);
   return { ok: true, id: msg.id };
 }

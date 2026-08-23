@@ -107,6 +107,7 @@ export async function listProjects(filters: ProjectListFilters): Promise<Project
       openRoleTitles: openRoles,
       lookingFor: openRoles,
       tags: p.tags ?? [],
+      coverImageUrl: (p as { cover_image_url?: string | null }).cover_image_url ?? null,
     };
   });
 

@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ImageUpload } from '@/components/ui/image-upload';
 import {
   PROJECT_CATEGORIES,
   PROJECT_CATEGORY_LABELS,
@@ -64,6 +65,7 @@ export function NewProjectForm() {
     githubUrl: '',
     demoUrl: '',
     websiteUrl: '',
+    coverImageUrl: '',
     tags: [] as string[],
     requiredSkills: [] as string[],
   });
@@ -174,6 +176,21 @@ export function NewProjectForm() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div>
+            <Label>Cover image (optional)</Label>
+            <div className="mt-1.5 flex items-start gap-3">
+              <ImageUpload
+                value={form.coverImageUrl || null}
+                onChange={(url) => update('coverImageUrl', url ?? '')}
+                alt={form.title || 'Project cover'}
+                shape="banner"
+                className="w-full max-w-md"
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              A cover image makes the project card stand out. 16:9, ~1MB works best.
+            </p>
+          </div>
           <div>
             <Label htmlFor="title">Title</Label>
             <Input
