@@ -4,6 +4,7 @@ import { MapPin, GraduationCap, Star } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
 import { getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
 import { getCurrentUser } from '@/lib/auth/session';
+import { Markdown } from '@/components/ui/markdown';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';

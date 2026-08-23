@@ -511,6 +511,16 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['analytics_events']['Row'], 'id' | 'created_at'>;
         Update: never;
       };
+      saved_projects: {
+        Row: {
+          id: string;
+          user_id: string;
+          project_id: string;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['saved_projects']['Row'], 'id' | 'created_at'>;
+        Update: never;
+      };
     };
     Views: Record<string, never>;
     Functions: {

@@ -3,6 +3,7 @@ import { Users, MapPin, Clock, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { SaveButton } from './save-button';
 import {
   PROJECT_CATEGORY_LABELS,
   PROJECT_STAGE_LABELS,
@@ -32,11 +33,13 @@ export interface ProjectCardData {
   tags: string[];
   matchScore?: number;
   coverImageUrl?: string | null;
+  isSaved?: boolean;
+  showSaveButton?: boolean;
 }
 
 export function ProjectCard({ data }: { data: ProjectCardData }) {
   return (
-    <Card className="group h-full overflow-hidden transition-shadow hover:border-border hover:shadow-md">
+    <Card className="group relative h-full overflow-hidden transition-shadow hover:border-border hover:shadow-md">
       {data.coverImageUrl ? (
         <Link href={`/projects/${data.slug}`} className="block">
           <div className="relative h-32 w-full overflow-hidden bg-muted">
@@ -48,6 +51,18 @@ export function ProjectCard({ data }: { data: ProjectCardData }) {
             />
           </div>
         </Link>
+      ) : null}
+      {data.showSaveButton !== false ? (
+        <div className="absolute right-2 top-2 z-10">
+          <SaveButton
+            projectId={data.id}
+            initialSaved={Boolean(data.isSaved)}
+            size="icon"
+            variant="ghost"
+            showLabel={false}
+            className="bg-background/80 backdrop-blur hover:bg-background"
+          />
+        </div>
       ) : null}
       <CardHeader className="space-y-3">
         <div className="flex items-start justify-between gap-3">

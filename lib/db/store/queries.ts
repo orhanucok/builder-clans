@@ -492,6 +492,31 @@ export function markNotificationRead(id: string): Row<'notifications'> | null {
 }
 
 // ---------------------------------------------------------------------------
+// Saved projects (bookmarks)
+// ---------------------------------------------------------------------------
+
+export function listSavedProjectsForUser(userId: string) {
+  return db.saved_projects.list((s) => (s as { user_id: string }).user_id === userId)
+    .sort((a, b) => (b as { created_at: string }).created_at.localeCompare((a as { created_at: string }).created_at));
+}
+
+export function saveProjectBookmark(userId: string, projectId: string) {
+  return db.saved_projects.insert({
+    user_id: userId,
+    project_id: projectId,
+    created_at: new Date().toISOString(),
+  } as never);
+}
+
+export function removeSavedProject(userId: string, projectId: string) {
+  const row = db.saved_projects.findOne(
+    (s) => (s as { user_id: string; project_id: string }).user_id === userId
+      && (s as { project_id: string }).project_id === projectId,
+  );
+  if (row) db.saved_projects.delete((row as { id: string }).id);
+}
+
+// ---------------------------------------------------------------------------
 // Clans
 // ---------------------------------------------------------------------------
 

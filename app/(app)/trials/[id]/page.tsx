@@ -35,10 +35,22 @@ export default async function TrialPage({ params }: { params: { id: string } }) 
   const tasks = db.tasks.list({ trial_id: trial.id }).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const channel = db.channels.findOne((c) => (c as { trial_id: string | null }).trial_id === trial.id);
 
+  // Compute trial countdown
+  const trialStartMs = new Date(trial.starts_at).getTime();
+  const trialEndMs = new Date(trial.ends_at).getTime();
+  const nowMs = Date.now();
+  const totalMs = Math.max(1, trialEndMs - trialStartMs);
+  const elapsedMs = Math.max(0, Math.min(totalMs, nowMs - trialStartMs));
+  const remainingMs = Math.max(0, trialEndMs - nowMs);
+  const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  const progressPct = Math.round((elapsedMs / totalMs) * 100);
+  const isExpired = remainingMs <= 0;
+  const isCompleted = trial.status !== 'ACTIVE';
+
   return (
     <div className="container-wide py-8">
-      <header className="mb-6 flex flex-col gap-3 border-b border-border/60 pb-6 md:flex-row md:items-start md:justify-between">
-        <div>
+      <header className="mb-6 flex flex-col gap-4 border-b border-border/60 pb-6 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="trial">Trial · {trial.status as TrialStatus}</Badge>
             <span>· {trial.duration_days}-day sprint</span>
@@ -50,6 +62,22 @@ export default async function TrialPage({ params }: { params: { id: string } }) 
             </Link>
           </h1>
           <p className="mt-2 max-w-2xl text-pretty text-muted-foreground">{trial.goal}</p>
+          {trial.status === 'ACTIVE' ? (
+            <div className="mt-4 max-w-md rounded-md border border-border bg-card/40 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-foreground">
+                  {isExpired ? 'Time up — wrap up' : `${remainingDays} day${remainingDays === 1 ? '' : 's'} remaining`}
+                </span>
+                <span className="tabular-nums text-muted-foreground">{progressPct}%</span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={isExpired ? 'h-full bg-destructive' : 'h-full bg-trial'}
+                  style={{ width: `${Math.min(100, progressPct)}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="flex -space-x-2">
           {members.map((m) => {

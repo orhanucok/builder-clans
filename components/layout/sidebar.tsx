@@ -12,6 +12,7 @@ import {
   Trophy,
   Users,
   Activity,
+  Bookmark,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -32,7 +33,9 @@ const NAV: Array<{
   { href: '/projects', label: 'My projects', icon: LayoutGrid },
   { href: '/matches', label: 'Matches', icon: Sparkles },
   { href: '/trials', label: 'Trials', icon: Hammer },
+  { href: '/saved', label: 'Saved', icon: Bookmark },
   { href: '/activity', label: 'Activity', icon: Activity },
+  { href: '/people', label: 'People', icon: Users },
   { href: '/clans', label: 'Clans', icon: Users, hidden: true /* feature flag */ },
   { href: '/leaderboard', label: 'Leaderboard', icon: Trophy, hidden: true },
   { href: '/settings', label: 'Settings', icon: Settings },

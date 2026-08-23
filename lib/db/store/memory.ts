@@ -237,6 +237,7 @@ class MemoryStore {
   notifications: Table<'notifications'> = new Table('notifications');
   reports: Table<'reports'> = new Table('reports');
   analytics_events: Table<'analytics_events'> = new Table('analytics_events');
+  saved_projects: Table<'saved_projects'> = new Table('saved_projects');
 
   allTables(): Table<TableName>[] {
     return [

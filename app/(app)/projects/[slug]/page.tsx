@@ -18,6 +18,7 @@ import { resolveProjectPermissions } from '@/lib/permissions/checks';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Markdown } from '@/components/ui/markdown';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -141,9 +142,9 @@ export default async function ProjectPage({ params }: { params: { slug: string }
               <CardTitle>About this project</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="whitespace-pre-line text-sm text-foreground/90">
-                {project.description}
-              </p>
+              <div className="text-sm text-foreground/90">
+                <Markdown source={project.description} />
+              </div>
               {skills.length > 0 ? (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {skills.map((s) => (
