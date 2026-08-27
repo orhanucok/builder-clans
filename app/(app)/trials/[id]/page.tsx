@@ -51,7 +51,7 @@ export default async function TrialPage({ params }: { params: { id: string } }) 
 
   return (
     <div className="container-wide py-8">
-      {trial.status === 'SUCCESSFUL' ? (
+      {(trial.status === 'SUCCESSFUL' || trial.status === 'COMPLETED') ? (
         <div className="mb-6 rounded-md border border-ship/30 bg-ship/5 p-5">
           <div className="flex items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-ship/15 text-ship">

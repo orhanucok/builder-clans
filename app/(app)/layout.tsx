@@ -8,6 +8,7 @@ import { Topbar } from '@/components/layout/topbar';
 import { SetupBanner } from '@/components/layout/setup-banner';
 import { WelcomeBanner } from '@/components/layout/welcome-banner';
 import { KeyboardShortcuts } from '@/components/layout/keyboard-shortcuts';
+import { CommandPalette } from '@/components/layout/command-palette';
 import { isFeatureEnabled } from '@/config/feature-flags';
 
 // Auth-bound pages must render per-request. We never want a stale
@@ -39,18 +40,48 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   let savedCount = 0;
   let headerAvatar: string | null = null;
   let isNewUser = false;
+  // Command palette data: top projects + people (server-fetched so the
+  // modal opens instantly without a follow-up fetch).
+  const initialProjects: Array<{ id: string; slug: string; title: string; shortDescription: string; ownerUsername: string; ownerDisplayName: string }> = [];
+  const initialPeople: Array<{ id: string; username: string; displayName: string; headline: string | null }> = [];
   if (user) {
     await ensureSeeded();
     initialNotifications = listNotificationsForUser(user.id, { limit: 8 });
     initialUnread = listNotificationsForUser(user.id, { unreadOnly: true, limit: 100 }).length;
-    const { getProfileById, listSavedProjectsForUser } = await import('@/lib/db/store/queries');
+    const { getProfileById, listSavedProjectsForUser, getProfileSkills } = await import('@/lib/db/store/queries');
     const profile = getProfileById(user.id);
     headerAvatar = profile?.avatar_url ?? null;
     savedCount = listSavedProjectsForUser(user.id).length;
-    // "New user" = signed in but profile incomplete (no headline, no skills)
     isNewUser = Boolean(
       profile && (!profile.onboarding_completed || (!profile.headline && !profile.bio)),
     );
+    // Pre-load top items for the command palette. We keep this small to
+    // avoid shipping the whole DB to the client.
+    const allProjects = (db.projects.all() as any[]).slice(0, 60);
+    const ownerIds = Array.from(new Set(allProjects.map((p) => p.owner_id)));
+    const ownerProfiles = (db.profiles.all() as any).filter((o) => ownerIds.includes(o.id));
+    const ownerMap = new Map(ownerProfiles.map((o) => [o.id, o]));
+    for (const p of allProjects) {
+      const owner = ownerMap.get(p.owner_id);
+      initialProjects.push({
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        shortDescription: p.short_description ?? '',
+        ownerUsername: owner?.username ?? 'unknown',
+        ownerDisplayName: owner?.display_name ?? 'Unknown',
+      });
+      if (initialProjects.length >= 20) break;
+    }
+    const allProfiles = (db.profiles.all() as any).slice(0, 30);
+    for (const p of allProfiles) {
+      initialPeople.push({
+        id: p.id,
+        username: p.username,
+        displayName: p.display_name,
+        headline: p.headline,
+      });
+    }
   }
 
   return (
@@ -92,6 +123,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </div>
       <KeyboardShortcuts isAuthenticated={Boolean(user)} />
+      <CommandPalette
+        isAuthenticated={Boolean(user)}
+        isDemo={!isSupabaseConfigured()}
+        projects={initialProjects}
+        people={initialPeople}
+      />
     </div>
   );
 }

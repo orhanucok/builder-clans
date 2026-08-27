@@ -73,6 +73,8 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
   const { toast } = useToast();
   const [step, setStep] = useState(0);
   const [pending, startTransition] = useTransition();
+  const [customSkill, setCustomSkill] = useState('');
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [data, setData] = useState({
     userType: '' as UserType | '',
     displayName: initialDisplayName,
@@ -124,6 +126,17 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
         return true;
     }
   }
+
+  const filteredSkillSuggestions = customSkill
+    ? Array.from(
+        new Set([...SUGGESTED_SKILLS, ...(CANONICAL_SKILLS as readonly string[])]),
+      )
+        .filter(
+          (s) =>
+            s.toLowerCase().includes(customSkill.toLowerCase()) &&
+            !data.skills.includes(s),
+        )
+    : [];
 
   function submit() {
     if (!data.userType || !data.weeklyHours) {
@@ -273,24 +286,64 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
                   );
                 })}
               </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Selected: {data.skills.length}/10</span>
-                {data.skills.length === 0 && <span>Pick at least one.</span>}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Add a custom skill"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      const v = (e.target as HTMLInputElement).value.trim();
-                      if (v) {
-                        toggle('skills', v);
-                        (e.target as HTMLInputElement).value = '';
+
+              <div className="space-y-2">
+                <div className="relative">
+                  <Input
+                    placeholder="Search or add a custom skill…"
+                    value={customSkill}
+                    onChange={(e) => {
+                      setCustomSkill(e.target.value);
+                      setSkillPickerOpen(true);
+                    }}
+                    onFocus={() => setSkillPickerOpen(true)}
+                    onBlur={() => setTimeout(() => setSkillPickerOpen(false), 150)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const v = customSkill.trim();
+                        if (v) {
+                          toggle('skills', v);
+                          setCustomSkill('');
+                          setSkillPickerOpen(false);
+                        }
+                      } else if (e.key === 'Escape') {
+                        setSkillPickerOpen(false);
                       }
-                    }
-                  }}
-                />
+                    }}
+                  />
+                  {skillPickerOpen && customSkill ? (
+                    <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-md">
+                      {filteredSkillSuggestions.length === 0 ? (
+                        <div className="p-2 text-xs text-muted-foreground">
+                          Press Enter to add <strong>{customSkill.trim()}</strong>
+                        </div>
+                      ) : (
+                        filteredSkillSuggestions.slice(0, 6).map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              toggle('skills', s);
+                              setCustomSkill('');
+                            }}
+                            className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+                          >
+                            <span>{s}</span>
+                            {data.skills.includes(s) ? (
+                              <span className="text-[10px] text-muted-foreground">added</span>
+                            ) : null}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Selected: {data.skills.length}/10</span>
+                  {data.skills.length === 0 && <span>Pick at least one.</span>}
+                </div>
               </div>
             </div>
           )}

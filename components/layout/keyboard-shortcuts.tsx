@@ -23,6 +23,7 @@ const SHORTCUTS: Shortcut[] = [
   { keys: ['G'], then: ['S'], label: 'Go to Settings', description: 'Open settings', href: '/settings' },
   { keys: ['N'], label: 'New project', description: 'Start a new project', href: '/projects/new' },
   { keys: ['/'], label: 'Search', description: 'Focus the global search bar', action: 'focus-search' },
+  { keys: ['⌘'], then: ['K'], label: 'Command palette', description: 'Search projects, people, jump anywhere', action: 'show-help' },
   { keys: ['?'], label: 'Show shortcuts', description: 'Open this cheat sheet', action: 'show-help' },
   { keys: ['Esc'], label: 'Close', description: 'Close any open dialog or popover', action: 'close' },
 ];
