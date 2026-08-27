@@ -364,19 +364,28 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
         <Button variant="ghost" onClick={prev} disabled={step === 0}>
           <ArrowLeft className="h-4 w-4" /> Back
         </Button>
-        {step < totalSteps - 1 ? (
-          <Button onClick={next} disabled={!canProceed()}>
-            Continue <ArrowRight className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button onClick={submit} loading={pending} disabled={!canProceed()}>
-            Finish <Check className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {step < totalSteps - 1 ? (
+            <Button variant="ghost" onClick={() => router.push('/discover')}>
+              Skip for now
+            </Button>
+          ) : null}
+          {step < totalSteps - 1 ? (
+            <Button onClick={next} disabled={!canProceed()}>
+              Continue <ArrowRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button onClick={submit} loading={pending} disabled={!canProceed()}>
+              Finish <Check className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Signed in as <Badge variant="muted">@{initialUsername}</Badge>
+        <span className="mx-2">·</span>
+        <span>Step {step + 1} of {totalSteps}</span>
       </p>
     </div>
   );
