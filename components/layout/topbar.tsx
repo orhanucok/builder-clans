@@ -31,13 +31,13 @@ export function Topbar({ user, notifications, unreadCount }: TopbarProps) {
         className="flex w-full max-w-md items-center"
         onSubmit={(e) => {
           e.preventDefault();
-          window.location.href = `/discover?q=${encodeURIComponent(search)}`;
+          window.location.href = `/search?q=${encodeURIComponent(search)}`;
         }}
       >
         <div className="relative w-full">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search projects, people, skills…"
+            placeholder="Search projects, people, skills…  (press /)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-9 pl-8"

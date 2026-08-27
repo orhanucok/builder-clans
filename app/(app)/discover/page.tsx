@@ -103,6 +103,12 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Sea
         clearHref={clearHref}
       />
 
+      {(q || category || stage || remote || skill) ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Showing filtered results. <Link href="/discover?tab={tab}" className="font-medium text-foreground hover:underline">Clear all filters</Link> to see everything.
+        </p>
+      ) : null}
+
       <Tabs defaultValue={tab} className="w-full">
         <TabsList>
           <TabsTrigger value="for-you" asChild>
@@ -144,13 +150,24 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Sea
           />
         </TabsContent>
         <TabsContent value="new">
-          <ProjectGrid projects={freshFiltered} />
+          <ProjectGrid
+            projects={freshFiltered}
+            emptyTitle="No projects match your filters"
+            emptyDescription="Try widening your search or removing some filters."
+            emptyFiltersClearHref={clearHref}
+          />
         </TabsContent>
         <TabsContent value="needs">
           <ProjectGrid
             projects={needsFiltered}
             emptyTitle="No teams looking right now"
-            emptyDescription="Check back later or be the first to start a project."
+            emptyDescription="Check back later, or be the first to start a project and bring the network together."
+            emptyAction={
+              <Button asChild>
+                <Link href="/projects/new">Start a project</Link>
+              </Button>
+            }
+            emptyFiltersClearHref={clearHref}
           />
         </TabsContent>
       </Tabs>
@@ -298,18 +315,31 @@ function ProjectGrid({
   emptyTitle,
   emptyDescription,
   emptyAction,
+  emptyFiltersClearHref,
 }: {
   projects: ProjectCardData[];
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: React.ReactNode;
+  emptyFiltersClearHref?: string;
 }) {
   if (projects.length === 0) {
     return (
       <EmptyState
         title={emptyTitle ?? 'No projects yet'}
         description={emptyDescription}
-        action={emptyAction}
+        action={
+          <>
+            {emptyAction}
+            {emptyFiltersClearHref ? (
+              <div className="mt-3">
+                <Link href={emptyFiltersClearHref} className="text-xs font-medium text-foreground hover:underline">
+                  Clear filters →
+                </Link>
+              </div>
+            ) : null}
+          </>
+        }
       />
     );
   }

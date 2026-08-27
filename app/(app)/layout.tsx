@@ -6,6 +6,7 @@ import { listNotificationsForUser } from '@/lib/db/store/queries';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { SetupBanner } from '@/components/layout/setup-banner';
+import { WelcomeBanner } from '@/components/layout/welcome-banner';
 import { KeyboardShortcuts } from '@/components/layout/keyboard-shortcuts';
 import { isFeatureEnabled } from '@/config/feature-flags';
 
@@ -35,18 +36,35 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // The client component then polls for changes.
   let initialNotifications: ReturnType<typeof listNotificationsForUser> = [];
   let initialUnread = 0;
+  let savedCount = 0;
+  let headerAvatar: string | null = null;
+  let isNewUser = false;
   if (user) {
     await ensureSeeded();
     initialNotifications = listNotificationsForUser(user.id, { limit: 8 });
     initialUnread = listNotificationsForUser(user.id, { unreadOnly: true, limit: 100 }).length;
+    const { getProfileById, listSavedProjectsForUser } = await import('@/lib/db/store/queries');
+    const profile = getProfileById(user.id);
+    headerAvatar = profile?.avatar_url ?? null;
+    savedCount = listSavedProjectsForUser(user.id).length;
+    // "New user" = signed in but profile incomplete (no headline, no skills)
+    isNewUser = Boolean(
+      profile && (!profile.onboarding_completed || (!profile.headline && !profile.bio)),
+    );
   }
 
   return (
     <div className="min-h-screen bg-background">
       {showSetupBanner && <SetupBanner />}
+      {user && isNewUser ? <WelcomeBanner /> : null}
       <div className="flex min-h-screen">
         <Sidebar
-          user={headerUser}
+          user={{
+            ...(headerUser ?? { displayName: '', username: '', avatarUrl: null }),
+            avatarUrl: headerAvatar,
+          }}
+          savedCount={savedCount}
+          unreadCount={initialUnread}
           flags={{
             clans: isFeatureEnabled('CLANS'),
             leaderboard: isFeatureEnabled('LEADERBOARD'),
@@ -55,7 +73,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar
-            user={headerUser}
+            user={{
+              ...(headerUser ?? { displayName: '', username: '', avatarUrl: null }),
+              avatarUrl: headerAvatar,
+            }}
             notifications={initialNotifications.map((n) => ({
               id: n.id,
               type: n.type,

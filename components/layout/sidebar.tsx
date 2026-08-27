@@ -15,12 +15,14 @@ import {
   Bookmark,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 
 interface SidebarProps {
-  user: { displayName: string; username: string } | null;
+  user: { displayName: string; username: string; avatarUrl: string | null } | null;
   flags: { clans: boolean; leaderboard: boolean; nativeChat: boolean };
+  savedCount?: number;
+  unreadCount?: number;
 }
 
 const NAV: Array<{
@@ -28,12 +30,13 @@ const NAV: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   hidden?: boolean;
+  badgeKey?: 'saved' | 'unread';
 }> = [
   { href: '/discover', label: 'Discover', icon: Compass },
   { href: '/projects', label: 'My projects', icon: LayoutGrid },
-  { href: '/matches', label: 'Matches', icon: Sparkles },
+  { href: '/matches', label: 'Matches', icon: Sparkles, badgeKey: 'unread' },
   { href: '/trials', label: 'Trials', icon: Hammer },
-  { href: '/saved', label: 'Saved', icon: Bookmark },
+  { href: '/saved', label: 'Saved', icon: Bookmark, badgeKey: 'saved' },
   { href: '/activity', label: 'Activity', icon: Activity },
   { href: '/people', label: 'People', icon: Users },
   { href: '/clans', label: 'Clans', icon: Users, hidden: true /* feature flag */ },
@@ -41,7 +44,7 @@ const NAV: Array<{
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function Sidebar({ user, flags }: SidebarProps) {
+export function Sidebar({ user, flags, savedCount, unreadCount }: SidebarProps) {
   const pathname = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border/60 bg-card/30 px-3 py-5 md:flex">
@@ -91,6 +94,7 @@ export function Sidebar({ user, flags }: SidebarProps) {
             className="flex items-center gap-2.5 rounded-md p-2 transition-colors hover:bg-foreground/5"
           >
             <Avatar className="h-8 w-8">
+              {user.avatarUrl ? <AvatarImage src={user.avatarUrl} /> : null}
               <AvatarFallback name={user.displayName} />
             </Avatar>
             <div className="min-w-0">
