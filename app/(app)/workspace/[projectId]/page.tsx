@@ -1,10 +1,12 @@
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
+import { Sparkles } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
 import { getCurrentUser } from '@/lib/auth/session';
 import { resolveProjectPermissions } from '@/lib/permissions/checks';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { OverviewTab } from './tabs/overview-tab';
@@ -52,6 +54,7 @@ export default async function WorkspacePage({
   const taskTotal = tasks.length;
   const taskDone = tasks.filter((t) => t.status === 'DONE').length;
   const progressPct = taskTotal > 0 ? Math.round((taskDone / taskTotal) * 100) : 0;
+  const isBrandNew = taskTotal === 0 && milestones.length === 0 && (members?.length ?? 0) <= 1;
 
   const ownerProfile = profileMap.get(project.owner_id);
   const owner = {
@@ -88,6 +91,48 @@ export default async function WorkspacePage({
       </header>
 
       <Separator className="mb-4" />
+
+      {isBrandNew ? (
+        <div className="mb-4 rounded-md border border-dashed border-primary/40 bg-primary/5 p-5">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold">Set up your project workspace</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                A few quick steps to get the most out of Builder Clans. You can do them in any order.
+              </p>
+              <ol className="mt-3 space-y-2 text-sm">
+                <li className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">1</span>
+                  <span>Add a <strong>milestone</strong> so collaborators know what you’re working toward</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">2</span>
+                  <span>Open a <strong>role</strong> on the project page to attract collaborators</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">3</span>
+                  <span>Create your first <strong>task</strong> in the Tasks tab</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full border border-border text-[10px] font-semibold text-muted-foreground">4</span>
+                  <span>Post an <strong>update</strong> in the Updates tab to start the conversation</span>
+                </li>
+              </ol>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button asChild size="sm">
+                  <Link href="../settings">Open settings</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/projects/${project.slug}`}>View public page</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <Tabs defaultValue="overview">
         <TabsList>

@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import { CheckCircle2, Clock } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
+import { Button } from '@/components/ui/button';
 import { getCurrentUser } from '@/lib/auth/session';
 import { resolveTrialPermissions } from '@/lib/permissions/checks';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -49,6 +51,46 @@ export default async function TrialPage({ params }: { params: { id: string } }) 
 
   return (
     <div className="container-wide py-8">
+      {trial.status === 'SUCCESSFUL' ? (
+        <div className="mb-6 rounded-md border border-ship/30 bg-ship/5 p-5">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-ship/15 text-ship">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold text-ship">Trial complete — this project just shipped work.</h2>
+              <p className="mt-1 text-sm text-foreground/80">
+                Both builders earned XP and a reputation boost. The team is now a permanent project member.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button asChild size="sm">
+                  <Link href={`/workspace/${trial.project_id}`}>Open project</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/projects/${project?.slug}`}>View project page</Link>
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/trials">See all trials</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : trial.status === 'ENDED' ? (
+        <div className="mb-6 rounded-md border border-border bg-muted/40 p-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+              <Clock className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Trial ended without converting.</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                That&apos;s fine — not every match becomes a team. Keep building and try other matches.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <header className="mb-6 flex flex-col gap-4 border-b border-border/60 pb-6 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
