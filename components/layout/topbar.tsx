@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { LogOut, Search, Settings, User } from 'lucide-react';
+import { Hammer, LogOut, Search, Settings, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,17 +16,36 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { signOutAction } from '@/app/(auth)/actions';
 import { NotificationBell, type NotificationSummary } from './notification-bell';
+import { MobileSidebarSheet } from './mobile-sidebar';
 
 interface TopbarProps {
   user: { displayName: string; username: string; avatarUrl: string | null } | null;
   notifications: NotificationSummary[];
   unreadCount: number;
+  flags: { clans: boolean; leaderboard: boolean; nativeChat: boolean };
+  savedCount?: number;
 }
 
-export function Topbar({ user, notifications, unreadCount }: TopbarProps) {
+export function Topbar({ user, notifications, unreadCount, flags, savedCount }: TopbarProps) {
   const [search, setSearch] = useState('');
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/60 bg-background/80 px-4 backdrop-blur md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border/60 bg-background/80 px-3 backdrop-blur md:gap-3 md:px-6">
+      {/* Mobile-only hamburger + brand */}
+      <div className="flex items-center gap-2 md:hidden">
+        <MobileSidebarSheet
+          user={user}
+          flags={flags}
+          savedCount={savedCount}
+          unreadCount={unreadCount}
+        />
+        <Link href="/discover" className="flex items-center gap-1.5 text-sm font-semibold">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-foreground text-background">
+            <Hammer className="h-3.5 w-3.5" />
+          </span>
+          <span>Builder Clans</span>
+        </Link>
+      </div>
+
       <form
         className="flex w-full max-w-md items-center"
         onSubmit={(e) => {
@@ -56,6 +75,7 @@ export function Topbar({ user, notifications, unreadCount }: TopbarProps) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Account menu">
                 <Avatar className="h-7 w-7">
+                  {user.avatarUrl ? <AvatarImage src={user.avatarUrl} /> : null}
                   <AvatarFallback name={user.displayName} />
                 </Avatar>
               </Button>

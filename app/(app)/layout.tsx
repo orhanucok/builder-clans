@@ -118,6 +118,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               createdAt: n.created_at,
             }))}
             unreadCount={initialUnread}
+            flags={{
+              clans: isFeatureEnabled('CLANS'),
+              leaderboard: isFeatureEnabled('LEADERBOARD'),
+              nativeChat: isFeatureEnabled('NATIVE_CHAT'),
+            }}
+            savedCount={savedCount}
           />
           <main className="flex-1 pb-16">{children}</main>
         </div>
