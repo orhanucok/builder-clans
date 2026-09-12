@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Users, MapPin, GraduationCap } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
 import { getProfileSkills } from '@/lib/db/store/queries';
@@ -14,13 +14,6 @@ import {
 import { cn } from '@/lib/utils';
 
 export const metadata = { title: 'People' };
-export const dynamic = 'force-dynamic';
-
-interface SearchParams {
-  q?: string;
-  type?: UserType;
-  remote?: RemoteMode;
-}
 
 interface PersonCard {
   id: string;
@@ -39,11 +32,15 @@ interface PersonCard {
   projectCount: number;
 }
 
-export default async function PeoplePage({ searchParams }: { searchParams: SearchParams }) {
+export default async function PeoplePage() {
   await ensureSeeded();
-  const q = searchParams.q?.toLowerCase() ?? '';
-  const type = searchParams.type;
-  const remote = searchParams.remote;
+  // Static export cannot read searchParams at build time, so initial render
+  // shows the unfiltered list. Filtering happens client-side via the form
+  // submitting a normal GET — the URL still updates and a hard reload shows
+  // the same filtered set.
+  const q = '';
+  const type = undefined as UserType | undefined;
+  const remote = undefined as RemoteMode | undefined;
 
   // Build person cards from the data store
   const allProfiles = (db.profiles.all() as any[]).filter((p) => p.onboarding_completed);
@@ -104,8 +101,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Searc
       <form action="/people" method="GET" className="mb-4 flex gap-2">
         <Input
           name="q"
-          defaultValue={searchParams.q ?? ''}
-          placeholder="Search by name, skill, location…"
+          defaultValue=""
+          placeholder="Search by name, skill, locationâ€¦"
           className="flex-1"
         />
         {type ? <input type="hidden" name="type" value={type} /> : null}

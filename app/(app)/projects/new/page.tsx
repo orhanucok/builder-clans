@@ -1,9 +1,8 @@
-import { NewProjectForm } from './new-project-form';
+﻿import { NewProjectForm } from './new-project-form';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 
 export const metadata = { title: 'New project' };
-export const dynamic = 'force-dynamic';
 
 export default async function NewProjectPage() {
   const me = await getCurrentUser();

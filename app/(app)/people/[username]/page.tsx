@@ -24,10 +24,23 @@ import {
 import { ProjectCard, type ProjectCardData } from '@/components/project/project-card';
 import { formatRelative } from '@/lib/utils';
 
-export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: { username: string } }) {
   return { title: `@${params.username}` };
+}
+
+export async function generateStaticParams() {
+  await ensureSeeded();
+  const usernames = db.profiles.all().map((p) => p.username);
+  // Always include the 13 demo personas so first-time visitors land on
+  // real-looking profile pages even before they sign up.
+  const demo = [
+    'defne', 'mert', 'selin', 'kaan', 'elif', 'burak',
+    'zeynep', 'cem', 'asli', 'arda', 'irem', 'bora', 'ada',
+  ];
+  const seen = new Set(usernames);
+  for (const u of demo) seen.add(u);
+  return Array.from(seen).map((username) => ({ username }));
 }
 
 export default async function ProfilePage({ params }: { params: { username: string } }) {

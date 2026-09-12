@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Plus, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { listProjects } from '@/lib/db/queries/projects';
@@ -8,7 +8,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ensureSeeded } from '@/lib/db/store';
 
 export const metadata = { title: 'My projects' };
-export const dynamic = 'force-dynamic';
 
 export default async function MyProjectsPage() {
   await ensureSeeded();

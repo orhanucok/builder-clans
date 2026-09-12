@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -84,7 +84,7 @@ export function MatchActions({ matchId, status, iAmCandidate, projectId }: Match
   if (status === 'MUTUAL') {
     return (
       <Button size="sm" variant="trial" loading={pending} onClick={startTrial}>
-        Start Trial Sprint →
+        Start Trial Sprint â†’
       </Button>
     );
   }

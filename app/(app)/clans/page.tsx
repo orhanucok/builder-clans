@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Users, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +11,6 @@ import { CLAN_TYPE_LABELS, type ClanType } from '@/config/constants';
 import { db } from '@/lib/db/store';
 
 export const metadata = { title: 'Clans' };
-export const dynamic = 'force-dynamic';
 
 export default async function ClansPage() {
   await ensureSeeded();
@@ -47,7 +46,7 @@ export default async function ClansPage() {
         <EmptyState
           icon={<Users className="h-10 w-10" />}
           title="No clans yet"
-          description="Clans are coming. They will sit above projects as community, leaderboard, and challenge layers — never replacing them."
+          description="Clans are coming. They will sit above projects as community, leaderboard, and challenge layers â€” never replacing them."
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -62,8 +61,8 @@ export default async function ClansPage() {
                       <CardTitle className="text-base">{c.name}</CardTitle>
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                         <Badge variant="muted">{CLAN_TYPE_LABELS[c.type as ClanType] ?? c.type}</Badge>
-                        {c.institution ? <span>· {c.institution}</span> : null}
-                        {c.country_code ? <span>· {c.country_code}</span> : null}
+                        {c.institution ? <span>Â· {c.institution}</span> : null}
+                        {c.country_code ? <span>Â· {c.country_code}</span> : null}
                       </div>
                     </div>
                     <span className="text-xs tabular-nums text-muted-foreground">{c.lifetime_xp.toLocaleString()} XP</span>

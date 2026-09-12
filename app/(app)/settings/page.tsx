@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+﻿import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 import { ensureSeeded } from '@/lib/db/store';
 import { getProfileById, getProfileSkills, getProfileInterests } from '@/lib/db/store/queries';
@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings' };
-export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   await ensureSeeded();

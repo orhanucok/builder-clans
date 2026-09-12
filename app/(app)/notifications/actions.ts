@@ -1,11 +1,15 @@
-'use server';
+/**
+ * Notification actions — plain functions usable from client components.
+ * No `'use server'` directive because we run inside static export. Pages
+ * that mutate notifications should call router.refresh() after success.
+ */
 
-import { revalidatePath } from 'next/cache';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
 import {
-  listNotificationsForUser, markNotificationRead, getProfileById,
+  listNotificationsForUser,
+  markNotificationRead,
 } from '@/lib/db/store/queries';
+import { getCurrentClientUser } from '@/lib/auth/demo';
 
 export interface NotificationSummary {
   id: string;
@@ -26,14 +30,20 @@ export interface NotificationsResult {
 
 export async function getTopNotificationsAction(limit = 8): Promise<NotificationsResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.', notifications: [], unreadCount: 0 };
   const list = listNotificationsForUser(me.id, { limit });
   const unread = listNotificationsForUser(me.id, { unreadOnly: true, limit: 100 }).length;
   return {
     ok: true,
     notifications: list.map((n) => ({
-      id: n.id, type: n.type, title: n.title, body: n.body, link: n.link,
-      readAt: n.read_at, createdAt: n.created_at,
+      id: n.id,
+      type: n.type,
+      title: n.title,
+      body: n.body,
+      link: n.link,
+      readAt: n.read_at,
+      createdAt: n.created_at,
     })),
     unreadCount: unread,
   };
@@ -41,27 +51,21 @@ export async function getTopNotificationsAction(limit = 8): Promise<Notification
 
 export async function markAllReadAction(): Promise<{ ok: boolean; error?: string; marked: number }> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.', marked: 0 };
   const all = listNotificationsForUser(me.id, { unreadOnly: true, limit: 200 });
   for (const n of all) {
     markNotificationRead(n.id);
   }
-  revalidatePath('/notifications');
   return { ok: true, marked: all.length };
 }
 
 export async function markOneReadAction(id: string): Promise<{ ok: boolean; error?: string }> {
   await ensureSeeded();
-  const me = await requireUser();
-  const note = db_getNotification(id, me.id);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const note = listNotificationsForUser(me.id, { limit: 500 }).find((x) => x.id === id);
   if (!note) return { ok: false, error: 'Notification not found.' };
   markNotificationRead(id);
-  revalidatePath('/notifications');
   return { ok: true };
-}
-
-// Small helper to keep the call-site readable.
-function db_getNotification(id: string, userId: string) {
-  const n = listNotificationsForUser(userId, { limit: 500 }).find((x) => x.id === id);
-  return n ?? null;
 }

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 /**
  * Root-level error boundary. Last line of defense for errors that escape

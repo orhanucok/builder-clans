@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -119,7 +119,8 @@ export function NewProjectForm() {
     });
   }
 
-  // AI assist: ask the provider to suggest structure. Falls back gracefully.
+  // AI assist: in static export we generate a deterministic mock suggestion
+  // client-side so the same UX works without a server runtime.
   async function aiAssist() {
     if (!form.title && !form.description) {
       toast({ title: 'Add a title or description first', variant: 'error' });
@@ -127,29 +128,17 @@ export function NewProjectForm() {
     }
     setAiBusy(true);
     try {
-      const res = await fetch('/api/ai/project-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: form.title, description: form.description }),
-      });
-      if (!res.ok) {
-        toast({ title: 'AI assist unavailable', description: 'Continue manually.', variant: 'error' });
-        return;
+      const plan = generateMockProjectPlan(form.title, form.description);
+      if (plan.title && !form.title) update('title', plan.title);
+      if (plan.problem && !form.shortDescription) update('shortDescription', plan.problem.slice(0, 160));
+      if (plan.goal && !form.description) update('description', plan.goal);
+      if (Array.isArray(plan.skills) && plan.skills.length) {
+        setForm((f) => ({
+          ...f,
+          requiredSkills: Array.from(new Set([...f.requiredSkills, ...plan.skills])).slice(0, 15),
+        }));
       }
-      const data = await res.json();
-      if (data?.plan) {
-        const p = data.plan;
-        if (p.title && !form.title) update('title', p.title);
-        if (p.problem && !form.shortDescription) update('shortDescription', p.problem.slice(0, 160));
-        if (p.goal && !form.description) update('description', p.goal);
-        if (Array.isArray(p.skills) && p.skills.length) {
-          setForm((f) => ({
-            ...f,
-            requiredSkills: Array.from(new Set([...f.requiredSkills, ...p.skills])).slice(0, 15),
-          }));
-        }
-        toast({ title: 'AI suggestions applied', description: 'Review and adjust as needed.', variant: 'success' });
-      }
+      toast({ title: 'AI suggestions applied', description: 'Review and adjust as needed.', variant: 'success' });
     } catch {
       toast({ title: 'AI assist failed', description: 'You can fill this in manually.', variant: 'error' });
     } finally {
@@ -463,9 +452,37 @@ export function NewProjectForm() {
           Cancel
         </Button>
         <Button type="submit" loading={pending}>
-          {pending ? 'Creating…' : 'Create project'}
+          {pending ? 'Creatingâ€¦' : 'Create project'}
         </Button>
       </div>
     </form>
   );
+}
+
+/**
+ * Deterministic offline project plan. Used when the AI route is unavailable
+ * (static export). Picks one of a few templates based on the title's keywords.
+ */
+function generateMockProjectPlan(title: string, description: string) {
+  const t = (title || description || '').toLowerCase();
+  const skills =
+    t.includes('ai') || t.includes('ml') || t.includes('gpt') || t.includes('model')
+      ? ['TypeScript', 'Python', 'Next.js', 'Postgres', 'OpenAI API']
+      : t.includes('design') || t.includes('ux') || t.includes('figma')
+      ? ['Figma', 'Design Systems', 'User Research']
+      : t.includes('mobile') || t.includes('ios') || t.includes('android')
+      ? ['React Native', 'iOS', 'Android', 'TypeScript']
+      : t.includes('game')
+      ? ['Unity', 'C#', '3D Modeling']
+      : ['TypeScript', 'React', 'Node.js', 'Postgres', 'Tailwind CSS'];
+  return {
+    title: title || 'A focused, founder-led project',
+    problem:
+      description ||
+      'People who want to ship something meaningful struggle to find collaborators who actually follow through. Builders end up working alone, and good ideas die in private repos.',
+    goal:
+      description ||
+      'Ship a tight MVP that solves the collaboration problem end-to-end. Land 10 builders as weekly active contributors within 60 days.',
+    skills,
+  };
 }

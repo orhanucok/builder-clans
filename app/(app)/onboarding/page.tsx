@@ -1,11 +1,10 @@
-import { OnboardingFlow } from './onboarding-flow';
+﻿import { OnboardingFlow } from './onboarding-flow';
 import { getCurrentUser } from '@/lib/auth/session';
 import { redirect } from 'next/navigation';
 import { ensureSeeded } from '@/lib/db/store';
 import { getProfileById } from '@/lib/db/store/queries';
 
 export const metadata = { title: 'Welcome to Builder Clans' };
-export const dynamic = 'force-dynamic';
 
 export default async function OnboardingPage() {
   await ensureSeeded();

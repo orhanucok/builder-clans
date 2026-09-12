@@ -1,19 +1,30 @@
-'use server';
+/**
+ * Trial actions — plain functions usable from client components.
+ */
 
 import { z } from 'zod';
-import { revalidatePath } from 'next/cache';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded, db } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
+import { getMemoryDb } from '@/lib/db/store/memory';
 import { canTransition, StatusMachines } from '@/config/transitions';
 import { awardXp } from '@/lib/xp/award';
 import { applyReputationEvent } from '@/lib/reputation/apply-event';
 import { REPUTATION } from '@/config/gamification';
 import type { MatchStatus, TrialStatus } from '@/config/constants';
 import {
-  createTrial, getMatch, getProjectById, updateMatch, addTrialMember, createTask,
-  getOrCreateTrialChannel, createTrialReview, updateTask, createMessage, listMessages,
+  createTrial,
+  getMatch,
+  getProjectById,
+  updateMatch,
+  addTrialMember,
+  createTask,
+  getOrCreateTrialChannel,
+  createTrialReview,
+  updateTask,
+  createMessage,
+  listMessages,
 } from '@/lib/db/store/queries';
 import { emitMessage } from '@/lib/db/store/messaging';
+import { getCurrentClientUser } from '@/lib/auth/demo';
 
 export interface TrialActionResult {
   ok: boolean;
@@ -30,11 +41,10 @@ const startSchema = z.object({
   deliverables: z.array(z.string()).min(1).max(8).optional(),
 });
 
-export async function createTrialAction(
-  input: z.input<typeof startSchema>,
-): Promise<TrialActionResult> {
+export async function createTrialAction(input: z.input<typeof startSchema>): Promise<TrialActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = startSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
@@ -54,7 +64,9 @@ export async function createTrialAction(
     return { ok: false, error: 'Only the project owner can start the trial.' };
   }
 
-  const existing = db.trials.findOne((t) => (t as { match_id: string | null }).match_id === match.id);
+  const existing = getMemoryDb().trials.findOne(
+    (t) => (t as { match_id: string | null }).match_id === match.id,
+  );
   if (existing && (existing.status === 'ACTIVE' || existing.status === 'DRAFT')) {
     return { ok: false, error: 'A trial already exists for this match.', trialId: existing.id };
   }
@@ -99,8 +111,6 @@ export async function createTrialAction(
     updateMatch(match.id, { status: 'TRIAL_STARTED' } as never);
   }
 
-  revalidatePath('/matches');
-  revalidatePath('/trials');
   return { ok: true, id: trial.id, trialId: trial.id };
 }
 
@@ -118,15 +128,15 @@ const reviewSchema = z.object({
   comment: z.string().max(1000).optional(),
 });
 
-export async function submitTrialReviewAction(
-  input: z.input<typeof reviewSchema>,
-): Promise<TrialActionResult> {
+export async function submitTrialReviewAction(input: z.input<typeof reviewSchema>): Promise<TrialActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = reviewSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
 
+  const db = getMemoryDb();
   const tm = db.trial_members.findOne(
     (m) => (m as { trial_id: string }).trial_id === data.trialId && m.user_id === me.id,
   );
@@ -157,7 +167,12 @@ export async function submitTrialReviewAction(
     comment: data.comment ?? null,
   });
 
-  const avg = (data.ratings.communication + data.ratings.reliability + data.ratings.technical + data.ratings.commitment + data.ratings.collaboration) / 5;
+  const avg =
+    (data.ratings.communication +
+      data.ratings.reliability +
+      data.ratings.technical +
+      data.ratings.commitment +
+      data.ratings.collaboration) / 5;
   if (avg >= 4 && data.wouldWorkAgain === 'YES') {
     const weight = Math.min(1, (avg - 3) / 2);
     await applyReputationEvent(null, {
@@ -182,7 +197,6 @@ export async function submitTrialReviewAction(
     });
   }
 
-  revalidatePath(`/trials/${data.trialId}`);
   return { ok: true };
 }
 
@@ -191,20 +205,20 @@ const completeSchema = z.object({
   decision: z.enum(['SUCCESSFUL', 'ENDED']),
 });
 
-export async function completeTrialAction(
-  input: z.input<typeof completeSchema>,
-): Promise<TrialActionResult> {
+export async function completeTrialAction(input: z.input<typeof completeSchema>): Promise<TrialActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = completeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const trial = db.trials.get(parsed.data.trialId);
+  const trial = getMemoryDb().trials.get(parsed.data.trialId);
   if (!trial) return { ok: false, error: 'Trial not found.' };
   if (trial.owner_id !== me.id) return { ok: false, error: 'Only the owner can complete the trial.' };
   if (!canTransition<TrialStatus>(StatusMachines.trial, trial.status as TrialStatus, 'COMPLETED')) {
     return { ok: false, error: `Cannot complete a ${trial.status} trial.` };
   }
 
+  const db = getMemoryDb();
   db.trials.update(trial.id, { status: 'COMPLETED' } as never);
 
   const members = db.trial_members.list({ trial_id: trial.id });
@@ -255,14 +269,8 @@ export async function completeTrialAction(
   } else {
     db.trials.update(trial.id, { status: 'ENDED' } as never);
   }
-  revalidatePath(`/trials/${trial.id}`);
-  revalidatePath(`/projects/${trial.project_id}`);
   return { ok: true };
 }
-
-// ---------------------------------------------------------------------------
-// Trial task + chat actions (used by the trial tabs client component).
-// ---------------------------------------------------------------------------
 
 export interface TrialTaskResult {
   ok: boolean;
@@ -280,9 +288,11 @@ const addTaskSchema = z.object({
 
 export async function addTrialTaskAction(input: z.input<typeof addTaskSchema>): Promise<TrialTaskResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = addTaskSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
+  const db = getMemoryDb();
   const trial = db.trials.get(parsed.data.trialId);
   if (!trial) return { ok: false, error: 'Trial not found.' };
   const member = db.trial_members.findOne(
@@ -297,7 +307,6 @@ export async function addTrialTaskAction(input: z.input<typeof addTaskSchema>): 
     assignee_id: parsed.data.assigneeId ?? undefined,
     created_by: me.id,
   });
-  revalidatePath(`/trials/${parsed.data.trialId}`);
   return { ok: true, id: task.id };
 }
 
@@ -308,9 +317,11 @@ const setStatusSchema = z.object({
 
 export async function setTrialTaskStatusAction(input: z.input<typeof setStatusSchema>): Promise<TrialTaskResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = setStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
+  const db = getMemoryDb();
   const task = db.tasks.get(parsed.data.taskId);
   if (!task || !task.trial_id) return { ok: false, error: 'Task not found.' };
   const member = db.trial_members.findOne(
@@ -318,7 +329,6 @@ export async function setTrialTaskStatusAction(input: z.input<typeof setStatusSc
   );
   if (!member) return { ok: false, error: 'Not a trial participant.' };
   updateTask(parsed.data.taskId, { status: parsed.data.status } as never);
-  revalidatePath(`/trials/${task.trial_id}`);
   return { ok: true };
 }
 
@@ -329,9 +339,11 @@ const setAssigneeSchema = z.object({
 
 export async function setTrialTaskAssigneeAction(input: z.input<typeof setAssigneeSchema>): Promise<TrialTaskResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = setAssigneeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
+  const db = getMemoryDb();
   const task = db.tasks.get(parsed.data.taskId);
   if (!task || !task.trial_id) return { ok: false, error: 'Task not found.' };
   const member = db.trial_members.findOne(
@@ -339,7 +351,6 @@ export async function setTrialTaskAssigneeAction(input: z.input<typeof setAssign
   );
   if (!member) return { ok: false, error: 'Not a trial participant.' };
   updateTask(parsed.data.taskId, { assignee_id: parsed.data.assigneeId } as never);
-  revalidatePath(`/trials/${task.trial_id}`);
   return { ok: true };
 }
 
@@ -350,9 +361,11 @@ const sendMessageSchema = z.object({
 
 export async function sendTrialMessageAction(input: z.input<typeof sendMessageSchema>): Promise<TrialTaskResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = sendMessageSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
+  const db = getMemoryDb();
   const channel = db.channels.get(parsed.data.channelId);
   if (!channel || !channel.trial_id) return { ok: false, error: 'Channel not found.' };
   const member = db.trial_members.findOne(
@@ -365,13 +378,14 @@ export async function sendTrialMessageAction(input: z.input<typeof sendMessageSc
     content: parsed.data.content,
   });
   emitMessage(message);
-  revalidatePath(`/trials/${channel.trial_id}`);
   return { ok: true, id: message.id };
 }
 
 export async function listTrialMessagesAction(trialId: string, limit = 200) {
   await ensureSeeded();
-  const channel = db.channels.findOne((c) => (c as { trial_id: string | null }).trial_id === trialId);
+  const channel = getMemoryDb().channels.findOne(
+    (c) => (c as { trial_id: string | null }).trial_id === trialId,
+  );
   if (!channel) return [];
   return listMessages(channel.id, limit);
 }

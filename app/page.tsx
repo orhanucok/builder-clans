@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import {
   ArrowRight,
   CheckCircle2,
@@ -14,7 +14,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
 // Force dynamic so we can use plain <Link> children without Slot issues.
-export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
   return (
@@ -59,7 +58,7 @@ export default function HomePage() {
           </Link>
         </div>
         <p className="mt-6 text-xs text-muted-foreground">
-          Free during public beta · No credit card · Built for serious builders
+          Free during public beta Â· No credit card Â· Built for serious builders
         </p>
       </section>
 
@@ -152,7 +151,7 @@ function Footer() {
   return (
     <footer className="container-wide border-t border-border/40 py-8 text-center text-xs text-muted-foreground">
       <p>
-        Builder Clans · {new Date().getFullYear()} · The network where the world builds.
+        Builder Clans Â· {new Date().getFullYear()} Â· The network where the world builds.
       </p>
     </footer>
   );

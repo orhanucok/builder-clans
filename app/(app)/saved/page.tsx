@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Bookmark } from 'lucide-react';
 import { listProjects } from '@/lib/db/queries/projects';
 import { listSavedProjectsForUser, getProfileById, getProjectSkills } from '@/lib/db/store/queries';
@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { getCurrentUser } from '@/lib/auth/session';
 
 export const metadata = { title: 'Saved projects' };
-export const dynamic = 'force-dynamic';
 
 export default async function SavedPage() {
   await ensureSeeded();

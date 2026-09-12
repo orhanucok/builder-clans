@@ -31,16 +31,23 @@ export function ImageUpload({
       return;
     }
     startTransition(async () => {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        toast({ title: 'Upload failed', description: data?.error ?? 'Unknown error', variant: 'error' });
-        return;
-      }
-      onChange(data.url);
-      toast({ title: 'Uploaded', variant: 'success' });
+      // Static export can't hit a real upload endpoint. Encode locally and
+      // store the data URL on the parent component — works for avatars /
+      // covers without a server.
+      const reader = new FileReader();
+      reader.onerror = () => {
+        toast({ title: 'Upload failed', description: 'Could not read file.', variant: 'error' });
+      };
+      reader.onload = () => {
+        const dataUrl = String(reader.result ?? '');
+        if (!dataUrl) {
+          toast({ title: 'Upload failed', description: 'Empty file.', variant: 'error' });
+          return;
+        }
+        onChange(dataUrl);
+        toast({ title: 'Uploaded', variant: 'success' });
+      };
+      reader.readAsDataURL(file);
     });
   }
 

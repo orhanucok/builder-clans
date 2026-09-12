@@ -1,14 +1,27 @@
-'use server';
+/**
+ * Workspace actions — plain functions usable from client components.
+ */
 
-import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded, db } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
+import { getMemoryDb } from '@/lib/db/store/memory';
 import {
-  getProjectById, listTasksForProject, listMilestones, listProjectUpdates,
-  createTask, updateTask, getTask, createMilestone, updateMilestone, getTask as _,
-  createProjectUpdate, createArtifact, getProjectById as __,
+  getProjectById,
+  listTasksForProject,
+  listMilestones,
+  listProjectUpdates,
+  createTask,
+  updateTask,
+  getTask,
+  createMilestone,
+  updateMilestone,
+  createProjectUpdate,
+  createArtifact,
   listProjectMembers,
+  createContribution,
+  createMessage,
+  listMessages,
+  getOrCreateProjectChannel,
 } from '@/lib/db/store/queries';
 import { resolveProjectPermissions } from '@/lib/permissions/checks';
 import {
@@ -22,6 +35,8 @@ import { canTransition, StatusMachines } from '@/config/transitions';
 import { awardXp } from '@/lib/xp/award';
 import { aiWeeklySummary } from '@/lib/ai/features';
 import type { TaskStatus, MilestoneStatus } from '@/config/constants';
+import { getCurrentClientUser } from '@/lib/auth/demo';
+import { emitMessage } from '@/lib/db/store/messaging';
 
 export interface WsResult {
   ok: boolean;
@@ -36,10 +51,11 @@ export async function createTaskAction(
   input: z.input<typeof taskCreateSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const proj = getProjectById(projectId);
   if (!proj) return { ok: false, error: 'Project not found.' };
-  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, projectId);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   const parsed = taskCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
@@ -52,7 +68,6 @@ export async function createTaskAction(
     due_date: parsed.data.dueDate ? parsed.data.dueDate.toISOString() : undefined,
     created_by: me.id,
   });
-  revalidatePath(`/workspace/${projectId}`);
   return { ok: true, id: task.id };
 }
 
@@ -63,18 +78,18 @@ const taskStatusSchema = z.object({
 
 export async function setTaskStatusAction(input: z.input<typeof taskStatusSchema>): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = taskStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const task = getTask(parsed.data.taskId);
   if (!task?.project_id) return { ok: false, error: 'Task not found.' };
-  const perms = resolveProjectPermissions(db, { userId: me.id }, task.project_id);
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, task.project_id);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   if (!canTransition<TaskStatus>(StatusMachines.task, task.status as TaskStatus, parsed.data.status)) {
     return { ok: false, error: `Cannot move from ${task.status} to ${parsed.data.status}.` };
   }
   updateTask(parsed.data.taskId, { status: parsed.data.status } as never);
-  revalidatePath(`/workspace/${task.project_id}`);
   return { ok: true };
 }
 
@@ -85,8 +100,9 @@ export async function createMilestoneAction(
   input: z.input<typeof milestoneCreateSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, projectId);
   if (!perms.canCreateMilestones) return { ok: false, error: 'Not allowed.' };
   const parsed = milestoneCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
@@ -96,7 +112,6 @@ export async function createMilestoneAction(
     description: parsed.data.description,
     target_date: parsed.data.targetDate ? parsed.data.targetDate.toISOString() : undefined,
   });
-  revalidatePath(`/workspace/${projectId}`);
   return { ok: true, id: ms.id };
 }
 
@@ -109,12 +124,13 @@ export async function setMilestoneStatusAction(
   input: z.input<typeof milestoneStatusSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = milestoneStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const ms = db.milestones.get(parsed.data.milestoneId);
+  const ms = getMemoryDb().milestones.get(parsed.data.milestoneId);
   if (!ms?.project_id) return { ok: false, error: 'Milestone not found.' };
-  const perms = resolveProjectPermissions(db, { userId: me.id }, ms.project_id);
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, ms.project_id);
   if (!perms.canCreateMilestones) return { ok: false, error: 'Not allowed.' };
   if (!canTransition<MilestoneStatus>(StatusMachines.milestone, ms.status as MilestoneStatus, parsed.data.status)) {
     return { ok: false, error: `Cannot move from ${ms.status} to ${parsed.data.status}.` };
@@ -135,7 +151,6 @@ export async function setMilestoneStatusAction(
       });
     }
   }
-  revalidatePath(`/workspace/${ms.project_id}`);
   return { ok: true };
 }
 
@@ -146,8 +161,9 @@ export async function postProjectUpdateAction(
   input: z.input<typeof projectUpdateCreateSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, projectId);
   if (!perms.canPostUpdates) return { ok: false, error: 'Not allowed.' };
   const parsed = projectUpdateCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
@@ -157,7 +173,6 @@ export async function postProjectUpdateAction(
     body: parsed.data.body,
     visibility: parsed.data.visibility,
   });
-  revalidatePath(`/workspace/${projectId}`);
   return { ok: true };
 }
 
@@ -187,8 +202,9 @@ export async function createArtifactAction(
   input: z.input<typeof artifactCreateSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, projectId);
   if (!perms.canCreateArtifacts) return { ok: false, error: 'Not allowed.' };
   const parsed = artifactCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
@@ -200,7 +216,6 @@ export async function createArtifactAction(
     description: parsed.data.description,
     creator_id: me.id,
   });
-  revalidatePath(`/workspace/${projectId}`);
   return { ok: true };
 }
 
@@ -210,8 +225,9 @@ export async function recordContributionAction(
   input: z.input<typeof contributionCreateSchema>,
 ): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, input.projectId);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, input.projectId);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   const parsed = contributionCreateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
@@ -233,14 +249,8 @@ export async function recordContributionAction(
       entityId: input.projectId,
     });
   }
-  revalidatePath(`/workspace/${input.projectId}`);
   return { ok: true };
 }
-
-import {
-  createContribution, createMessage, listMessages, getOrCreateProjectChannel,
-} from '@/lib/db/store/queries';
-import { emitMessage } from '@/lib/db/store/messaging';
 
 // Chat (project channel)
 
@@ -251,24 +261,27 @@ const sendChatSchema = z.object({
 
 export async function sendChatMessageAction(input: z.input<typeof sendChatSchema>): Promise<WsResult> {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, input.projectId);
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, input.projectId);
   if (!perms.canView) return { ok: false, error: 'Not allowed.' };
   const parsed = sendChatSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const channel = getOrCreateProjectChannel(parsed.data.projectId, 'general');
   const msg = createMessage({ channel_id: channel.id, sender_id: me.id, content: parsed.data.content });
   emitMessage(msg);
-  revalidatePath(`/workspace/${parsed.data.projectId}`);
   return { ok: true, id: msg.id };
 }
 
 export async function listChatMessagesAction(projectId: string, limit = 200) {
   await ensureSeeded();
-  const me = await requireUser();
-  const perms = resolveProjectPermissions(db, { userId: me.id }, projectId);
+  const me = getCurrentClientUser();
+  if (!me) return [];
+  const perms = resolveProjectPermissions(getMemoryDb() as never, { userId: me.id }, projectId);
   if (!perms.canView) return [];
-  const channel = db.channels.findOne((c) => (c as { project_id: string | null }).project_id === projectId);
+  const channel = getMemoryDb().channels.findOne(
+    (c) => (c as { project_id: string | null }).project_id === projectId,
+  );
   if (!channel) return [];
   return listMessages(channel.id, limit);
 }

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Suspense, useState, useTransition } from 'react';
 import Link from 'next/link';
@@ -61,7 +61,7 @@ function LoginForm() {
           <div className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs">
             <strong className="block text-foreground">Demo mode</strong>
             <p className="mt-1 text-muted-foreground">
-              No backend yet — pick a persona to explore the app from their perspective,
+              No backend yet â€” pick a persona to explore the app from their perspective,
               or sign up with your own email.
             </p>
             <div className="mt-3 grid grid-cols-1 gap-1.5">
@@ -77,7 +77,7 @@ function LoginForm() {
                     <span className="font-medium text-foreground">{p.displayName}</span>
                     <span className="text-muted-foreground">{p.headline}</span>
                   </span>
-                  <span className="text-muted-foreground group-hover:text-foreground">→</span>
+                  <span className="text-muted-foreground group-hover:text-foreground">â†’</span>
                 </button>
               ))}
             </div>
@@ -132,7 +132,7 @@ function LoginForm() {
             )}
           </div>
           <Button type="submit" loading={pending} className="w-full">
-            {pending ? 'Signing in…' : 'Log in'}
+            {pending ? 'Signing inâ€¦' : 'Log in'}
           </Button>
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">

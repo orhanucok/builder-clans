@@ -1,27 +1,29 @@
 /**
- * Demo auth actions — sign-up, sign-in, sign-out for the in-memory backend.
+ * Demo auth — works in both static export and dev. Replaces cookie-based
+ * session with localStorage (see lib/auth/client-session.ts).
  *
- * Used when Supabase env is not configured. Real Supabase auth lives in
- * app/(auth)/actions.ts which calls into the Supabase clients. This module
- * keeps the demo experience on par with the real one so users can actually
- * use the app without provisioning Supabase.
+ * No `'use server'` directive: these functions run wherever they're called.
+ * Server components should not import this file directly (no cookies /
+ * redirects); client components handle all auth flows.
  */
 
-'use server';
-
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { getAuthStore, ensureSeeded } from '@/lib/db/store';
 import {
-  upsertProfile, setProfileSkills, setProfileInterests,
+  getClientSession,
+  setClientSession,
+  clearClientSession,
+} from '@/lib/auth/client-session';
+import { getMemoryDb } from '@/lib/db/store/memory';
+import {
+  upsertProfile,
+  setProfileSkills,
+  setProfileInterests,
+  getProfileById,
+  listProfiles,
+  updateProfile,
 } from '@/lib/db/store/queries';
-import { DEMO_SESSION_COOKIE, DEMO_USER_COOKIE } from '@/lib/auth/session';
-import { isSupabaseConfigured } from '@/lib/env';
 import { signInSchema, signUpSchema, onboardingSchema } from '@/lib/validation/schemas';
 import { z } from 'zod';
 import { CANONICAL_SKILLS } from '@/config/matching';
-
-const ONE_WEEK = 60 * 60 * 24 * 7;
 
 export interface ActionResult {
   ok: boolean;
@@ -29,49 +31,148 @@ export interface ActionResult {
   fieldErrors?: Record<string, string>;
 }
 
-function isDemoMode(): boolean {
-  return !isSupabaseConfigured();
+interface DemoAuth {
+  // Lightweight demo auth backed by the in-memory store. Passwords are
+  // stored alongside users in the seed; this is a demo only.
+  createUser(email: string, password: string): { id: string; email: string };
+  getByEmail(email: string): { id: string; email: string; password: string } | null;
+  getById(id: string): { id: string; email: string } | null;
+  verifyPassword(user: { password: string }, password: string): boolean;
+  createSession(userId: string): string;
+  destroySession(_token: string): void;
+  getUserBySession(token: string): { id: string } | null;
 }
 
-export async function signInAction(formData: FormData | Record<string, unknown>): Promise<ActionResult> {
-  if (!isDemoMode()) {
-    return { ok: false, error: 'Demo sign-in is only available when Supabase is not configured.' };
-  }
-  await ensureSeeded();
-  const parsed = signInSchema.safeParse(parseFormData(formData));
-  if (!parsed.success) return zodErrorResult(parsed.error);
+// Demo auth is stored in a dedicated localStorage key so it survives reloads
+// independently of the seeded profile data.
+const AUTH_KEY = 'bc.demo.auth';
 
-  const auth = getAuthStore();
+interface DemoAuthBlob {
+  users: Array<{ id: string; email: string; password: string }>;
+  sessions: Array<{ token: string; userId: string; createdAt: number }>;
+}
+
+function loadBlob(): DemoAuthBlob {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return { users: [], sessions: [] };
+  }
+  try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    if (!raw) return { users: [], sessions: [] };
+    return JSON.parse(raw) as DemoAuthBlob;
+  } catch {
+    return { users: [], sessions: [] };
+  }
+}
+
+function saveBlob(blob: DemoAuthBlob): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(AUTH_KEY, JSON.stringify(blob));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getDemoAuth(): DemoAuth {
+  return {
+    createUser(email, password) {
+      const blob = loadBlob();
+      const id = `usr_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+      const user = { id, email, password };
+      blob.users.push(user);
+      saveBlob(blob);
+      return { id: user.id, email: user.email };
+    },
+    getByEmail(email) {
+      const blob = loadBlob();
+      return blob.users.find((u) => u.email === email) ?? null;
+    },
+    getById(id) {
+      const blob = loadBlob();
+      const u = blob.users.find((u) => u.id === id);
+      return u ? { id: u.id, email: u.email } : null;
+    },
+    verifyPassword(user, password) {
+      return user.password === password;
+    },
+    createSession(userId) {
+      const blob = loadBlob();
+      const token = `s_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+      blob.sessions.push({ token, userId, createdAt: Date.now() });
+      saveBlob(blob);
+      return token;
+    },
+    destroySession(token) {
+      const blob = loadBlob();
+      blob.sessions = blob.sessions.filter((s) => s.token !== token);
+      saveBlob(blob);
+    },
+    getUserBySession(token) {
+      const blob = loadBlob();
+      const s = blob.sessions.find((x) => x.token === token);
+      return s ? { id: s.userId } : null;
+    },
+  };
+}
+
+/**
+ * Look up the current user from the client session. Returns null when there
+ * is no session, the session has expired, or the user no longer exists.
+ */
+export function getCurrentClientUser(): {
+  id: string;
+  email: string;
+  displayName: string;
+  username: string;
+} | null {
+  const session = getClientSession();
+  if (!session) return null;
+  const profile = getProfileById(session.userId);
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    email: profile.email ?? '',
+    displayName: profile.display_name ?? profile.username ?? 'Builder',
+    username: profile.username ?? profile.id.slice(0, 8),
+  };
+}
+
+export async function signInAction(input: FormData | Record<string, unknown>): Promise<ActionResult> {
+  const parsed = signInSchema.safeParse(parseInput(input));
+  if (!parsed.success) return zodErrorResult(parsed.error);
+  const auth = getDemoAuth();
   const user = auth.getByEmail(parsed.data.email);
   if (!user) return { ok: false, error: 'No account with this email. Try signing up.' };
   if (!auth.verifyPassword(user, parsed.data.password)) {
-    return { ok: false, error: 'Wrong password. Try again or reset it.' };
+    return { ok: false, error: 'Wrong password. Try again.' };
   }
-  await startDemoSession(user.id);
+  setClientSession(user.id);
+  // Make sure the session token is also valid in the demo-auth store so that
+  // server-side helpers (if any are accidentally hit during the transition)
+  // can find the user.
+  auth.createSession(user.id);
   return { ok: true };
 }
 
-export async function signUpAction(formData: FormData | Record<string, unknown>): Promise<ActionResult> {
-  if (!isDemoMode()) {
-    return { ok: false, error: 'Demo sign-up is only available when Supabase is not configured.' };
-  }
-  await ensureSeeded();
-  const parsed = signUpSchema.safeParse(parseFormData(formData));
+export async function signUpAction(input: FormData | Record<string, unknown>): Promise<ActionResult> {
+  const parsed = signUpSchema.safeParse(parseInput(input));
   if (!parsed.success) return zodErrorResult(parsed.error);
 
-  const auth = getAuthStore();
+  const auth = getDemoAuth();
   if (auth.getByEmail(parsed.data.email)) {
     return { ok: false, error: 'An account with this email already exists.' };
   }
 
-  // Create a username from the email local-part if not provided
-  const baseUsername = parsed.data.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'user';
-  const existingUsernames = new Set(
-    (await import('@/lib/db/store/queries')).listProfiles().map((p) => p.username),
-  );
+  const baseUsername = parsed.data.email
+    .split('@')[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 20) || 'user';
+  const existing = new Set(listProfiles().map((p) => p.username));
   let username = baseUsername;
   let n = 1;
-  while (existingUsernames.has(username)) {
+  while (existing.has(username)) {
     username = `${baseUsername}${n}`;
     n++;
   }
@@ -84,65 +185,51 @@ export async function signUpAction(formData: FormData | Record<string, unknown>)
     email: parsed.data.email,
     onboarding_completed: false,
   });
-
-  await startDemoSession(user.id);
+  setClientSession(user.id);
+  auth.createSession(user.id);
   return { ok: true };
 }
 
 export async function signOutAction(): Promise<void> {
-  if (!isDemoMode()) return;
-  const cookieStore = cookies();
-  const token = cookieStore.get(DEMO_SESSION_COOKIE)?.value;
-  if (token) {
-    getAuthStore().destroySession(token);
-  }
-  cookieStore.delete(DEMO_SESSION_COOKIE);
-  cookieStore.delete(DEMO_USER_COOKIE);
-  redirect('/');
+  const session = getClientSession();
+  if (session) getDemoAuth().destroySession(session.token);
+  clearClientSession();
 }
 
 export async function switchPersonaAction(personaEmail: string): Promise<ActionResult> {
-  if (!isDemoMode()) {
-    return { ok: false, error: 'Persona switching is only available in demo mode.' };
-  }
-  await ensureSeeded();
-  const auth = getAuthStore();
+  const auth = getDemoAuth();
   const user = auth.getByEmail(personaEmail);
   if (!user) return { ok: false, error: `No demo persona with email ${personaEmail}.` };
-  await startDemoSession(user.id);
+  setClientSession(user.id);
   return { ok: true };
 }
 
-export async function completeOnboardingAction(
-  rawData: Record<string, unknown>,
-): Promise<ActionResult> {
-  if (!isDemoMode()) {
-    return { ok: false, error: 'Demo onboarding is only available in demo mode.' };
-  }
-  await ensureSeeded();
-  const user = await requireDemoUser();
-  if (!user) return { ok: false, error: 'Not signed in.' };
-
+export async function completeOnboardingAction(rawData: Record<string, unknown>): Promise<ActionResult> {
+  const session = getClientSession();
+  if (!session) return { ok: false, error: 'Not signed in.' };
   const parsed = onboardingSchema.safeParse(rawData);
   if (!parsed.success) return zodErrorResult(parsed.error);
-
-  const profile = (await import('@/lib/db/store/queries')).getProfileById(user.id);
+  const profile = getProfileById(session.userId);
   if (!profile) return { ok: false, error: 'Profile not found.' };
 
-  // Skills come in as a comma-separated list of canonical names. We store them as-is;
-  // matching is done against CANONICAL_SKILLS anyway.
   const skills = Array.isArray(parsed.data.skills)
     ? (parsed.data.skills as string[])
-    : String(parsed.data.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    : String(parsed.data.skills ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
   const interests = Array.isArray(parsed.data.interests)
     ? (parsed.data.interests as string[])
-    : String(parsed.data.interests ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    : String(parsed.data.interests ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
 
   const knownSkills = new Set(CANONICAL_SKILLS as readonly string[]);
   const validSkills = skills.filter((s) => knownSkills.has(s));
   const validInterests = interests.filter((i) => i.length > 0);
 
-  (await import('@/lib/db/store/queries')).updateProfile(user.id, {
+  updateProfile(session.userId, {
     display_name: parsed.data.displayName,
     username: parsed.data.username || profile.username,
     headline: parsed.data.headline ?? null,
@@ -156,40 +243,17 @@ export async function completeOnboardingAction(
     remote_preference: (parsed.data.remotePreference as never) ?? null,
     onboarding_completed: true,
   });
-  setProfileSkills(user.id, validSkills);
-  setProfileInterests(user.id, validInterests);
+  setProfileSkills(session.userId, validSkills);
+  setProfileInterests(session.userId, validInterests);
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
-
-async function startDemoSession(userId: string): Promise<void> {
-  const token = getAuthStore().createSession(userId);
-  const cookieStore = cookies();
-  cookieStore.set(DEMO_SESSION_COOKIE, token, {
-    httpOnly: true, sameSite: 'lax', path: '/', maxAge: ONE_WEEK, secure: process.env.NODE_ENV === 'production',
-  });
-  cookieStore.set(DEMO_USER_COOKIE, userId, {
-    httpOnly: true, sameSite: 'lax', path: '/', maxAge: ONE_WEEK, secure: process.env.NODE_ENV === 'production',
-  });
-}
-
-async function requireDemoUser(): Promise<{ id: string; email: string } | null> {
-  const cookieStore = cookies();
-  const sessionToken = cookieStore.get(DEMO_SESSION_COOKIE)?.value;
-  const userId = cookieStore.get(DEMO_USER_COOKIE)?.value;
-  if (!sessionToken || !userId) return null;
-  const auth = getAuthStore();
-  const user = auth.getById(userId);
-  if (!user) return null;
-  if (auth.getUserBySession(sessionToken)?.id !== user.id) return null;
-  return { id: user.id, email: user.email };
-}
-
-function parseFormData(input: FormData | Record<string, unknown>): Record<string, unknown> {
-  if (input instanceof FormData) {
+function parseInput(input: FormData | Record<string, unknown>): Record<string, unknown> {
+  if (typeof FormData !== 'undefined' && input instanceof FormData) {
     const out: Record<string, unknown> = {};
-    input.forEach((v, k) => { out[k] = v; });
+    input.forEach((v, k) => {
+      out[k] = v;
+    });
     return out;
   }
   return input;
@@ -203,3 +267,8 @@ function zodErrorResult(err: z.ZodError): ActionResult {
   }
   return { ok: false, error: 'Please fix the highlighted fields.', fieldErrors };
 }
+
+// Silence unused-import warnings during the server-to-client transition. The
+// memory DB import keeps tree-shaking honest about which modules are still
+// used by the rest of the codebase.
+void getMemoryDb;

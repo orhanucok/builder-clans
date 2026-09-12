@@ -1,22 +1,16 @@
 /**
- * Auth helpers.
+ * Auth types + thin server-side shim.
  *
- * Master plan §84-§85: server-side auth check, never trust the client.
- * This module is the only place that reads auth state; route handlers
- * and RSC call `requireUser()` to gate access.
+ * Static export has no server runtime, so the cookie-based demo session that
+ * lived here has been moved to `lib/auth/client-session.ts`. For actual auth
+ * checks, import `getCurrentClientUser` from `@/lib/auth/demo` and run it
+ * in a `useEffect` (or a top-level client check).
  *
- * Currently the app runs entirely on the in-memory demo auth store. When
- * Supabase support is added, the dispatch will go here.
+ * This file remains only so existing types re-export cleanly without
+ * forcing every page to be rewritten as a client component.
  */
 
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { getAuthStore, ensureSeeded } from '@/lib/db/store';
-import { getProfileById } from '@/lib/db/store/queries';
 import type { User } from '@supabase/supabase-js';
-
-const DEMO_SESSION_COOKIE = 'bc_demo_session';
-const DEMO_USER_COOKIE = 'bc_demo_user';
 
 export interface SessionUser {
   id: string;
@@ -27,39 +21,16 @@ export interface SessionUser {
 }
 
 /**
- * Returns the current user, or null. Safe to call from anywhere.
+ * Returns the current user, or null. On the server during static export this
+ * always returns null (no request, no cookies). On the client, prefer
+ * `getCurrentClientUser()` from `@/lib/auth/demo`.
  */
 export async function getCurrentUser(): Promise<SessionUser | null> {
-  return getDemoUser();
+  return null;
 }
 
-export async function requireUser(returnTo?: string): Promise<SessionUser> {
-  const u = await getCurrentUser();
-  if (!u) {
-    const target = returnTo ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login';
-    redirect(target);
-  }
-  return u;
+export async function requireUser(_returnTo?: string): Promise<SessionUser> {
+  throw new Error(
+    'requireUser is not available in static export mode. Use a client-side auth guard.',
+  );
 }
-
-async function getDemoUser(): Promise<SessionUser | null> {
-  await ensureSeeded();
-  const cookieStore = cookies();
-  const sessionToken = cookieStore.get(DEMO_SESSION_COOKIE)?.value;
-  const userId = cookieStore.get(DEMO_USER_COOKIE)?.value;
-  if (!sessionToken || !userId) return null;
-  const auth = getAuthStore();
-  const user = auth.getById(userId);
-  if (!user) return null;
-  if (auth.getUserBySession(sessionToken)?.id !== user.id) return null;
-  const profile = getProfileById(user.id);
-  return {
-    id: user.id,
-    email: user.email,
-    displayName: profile?.display_name ?? user.email,
-    username: profile?.username ?? user.email.split('@')[0],
-    user: { id: user.id, email: user.email, isDemo: true as const } as unknown as User,
-  };
-}
-
-export { DEMO_SESSION_COOKIE, DEMO_USER_COOKIE };

@@ -1,4 +1,4 @@
-import { RowListSkeleton } from '@/components/ui/skeleton';
+﻿import { RowListSkeleton } from '@/components/ui/skeleton';
 
 export default function Loading() {
   return (

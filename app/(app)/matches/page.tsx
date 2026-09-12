@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,7 +12,6 @@ import { MatchActions } from './match-actions';
 import type { MatchStatus } from '@/config/constants';
 
 export const metadata = { title: 'Matches' };
-export const dynamic = 'force-dynamic';
 
 export default async function MatchesPage() {
   await ensureSeeded();
@@ -112,7 +111,7 @@ export default async function MatchesPage() {
                           return counterpartiesMap.get(cid)?.display_name ?? owner?.display_name ?? 'Unknown';
                         })()}
                       </span>
-                      {' · '}
+                      {' Â· '}
                       {formatRelative(m.updated_at)}
                     </p>
                   </div>

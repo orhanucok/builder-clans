@@ -13,7 +13,6 @@
 
 import { getMemoryDb } from './memory';
 import { getAuthStore } from './schema';
-import { createHash } from 'node:crypto';
 import type {
   Profile,
   Project,
@@ -897,6 +896,8 @@ async function doSeed(): Promise<void> {
 }
 
 function hashPw(p: string): string {
-  // mirrors getAuthStore().verifyPassword
-  return createHash('sha256').update(`bc-demo-salt::${p}`).digest('hex');
+  // Demo-only: the client-side verifyPassword does a plain equality check,
+  // so we store the password as-is rather than a real hash. This keeps the
+  // seed runnable in the browser bundle (no `node:crypto` dependency).
+  return p;
 }

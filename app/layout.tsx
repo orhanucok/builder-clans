@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from 'next';
+﻿import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { getEnv } from '@/lib/env';
@@ -20,7 +20,7 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   title: {
     default: 'Builder Clans',
-    template: '%s · Builder Clans',
+    template: '%s Â· Builder Clans',
   },
   description:
     'The network where the world builds. Find the right collaborators, test how you work together, and ship projects that prove what you can do.',

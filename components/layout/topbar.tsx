@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Hammer, LogOut, Search, Settings, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { signOutAction } from '@/app/(auth)/actions';
+import { switchPersonaAction } from '@/lib/auth/demo';
 import { NotificationBell, type NotificationSummary } from './notification-bell';
 import { MobileSidebarSheet } from './mobile-sidebar';
 
@@ -102,13 +104,7 @@ export function Topbar({ user, notifications, unreadCount, flags, savedCount }: 
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link
-                  href="/api/dev/login?email=defne@builderclans.dev&next=/discover"
-                  className="flex items-center gap-2"
-                >
-                  <User className="h-3.5 w-3.5" />
-                  <span>Switch persona (demo)</span>
-                </Link>
+                <PersonaSwitcher />
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <form
@@ -133,5 +129,29 @@ export function Topbar({ user, notifications, unreadCount, flags, savedCount }: 
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * Inline component that switches the demo persona in localStorage and reloads
+ * the page so every dependent view (sidebar counts, topbar avatar, etc.)
+ * re-fetches against the new identity.
+ */
+function PersonaSwitcher() {
+  const router = useRouter();
+  const onClick = async () => {
+    await switchPersonaAction('defne@builderclans.dev');
+    router.refresh();
+    router.push('/discover');
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent"
+    >
+      <User className="h-3.5 w-3.5" />
+      <span>Switch persona (demo)</span>
+    </button>
   );
 }

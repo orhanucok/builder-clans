@@ -1,12 +1,11 @@
 /**
- * In-process pub/sub for chat messages.
+ * Chat message hub.
  *
- * Master plan: production uses Supabase Realtime / websockets. For the demo,
- * we run a tiny in-memory EventEmitter that fan-outs to all connected
- * SSE clients per channel.
- *
- * Subscribers are per-channel. createMessageAction emits to the channel;
- * the SSE route handler subscribes per request and writes to the stream.
+ * Two delivery paths so the same call works in both server-rendered and
+ * static-exported builds:
+ *  1. In-process subscribers via ChannelHub (used by the SSE route).
+ *  2. Browser BroadcastChannel — delivers to other tabs and to the same tab
+ *     when no server runtime is available (static export).
  */
 
 import type { Row } from './memory';
@@ -43,7 +42,11 @@ class ChannelHub {
     const set = this.channels.get(channelId);
     if (!set) return;
     for (const fn of set) {
-      try { fn(msg); } catch { /* swallow listener errors */ }
+      try {
+        fn(msg);
+      } catch {
+        /* swallow listener errors */
+      }
     }
   }
 
@@ -58,15 +61,30 @@ export function getMessageHub(): ChannelHub {
   return _hub;
 }
 
+const BROADCAST_PREFIX = 'bc.chat.';
+
+function safeBroadcast(channelId: string, msg: MessagePayload): void {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return;
+  try {
+    const bc = new BroadcastChannel(`${BROADCAST_PREFIX}${channelId}`);
+    bc.postMessage(msg);
+    bc.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Helper to emit a new message from a `messages` Row.
  */
 export function emitMessage(row: Row<'messages'>) {
-  getMessageHub().emit(row.channel_id, {
+  const payload: MessagePayload = {
     id: row.id,
     channel_id: row.channel_id,
     sender_id: row.sender_id,
     content: row.content,
     created_at: row.created_at,
-  });
+  };
+  getMessageHub().emit(row.channel_id, payload);
+  safeBroadcast(row.channel_id, payload);
 }

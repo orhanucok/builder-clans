@@ -20,7 +20,11 @@ import { SettingsTab } from './tabs/settings-tab';
 import { PROJECT_STAGE_LABELS, type ProjectStage } from '@/config/constants';
 
 export const metadata = { title: 'Project workspace' };
-export const dynamic = 'force-dynamic';
+
+export async function generateStaticParams() {
+  await ensureSeeded();
+  return db.projects.all().map((p) => ({ projectId: p.id }));
+}
 
 export default async function WorkspacePage({
   params,

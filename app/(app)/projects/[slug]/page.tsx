@@ -37,10 +37,14 @@ import { ShipButton } from './ship-button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelative } from '@/lib/utils';
 
-export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: { slug: string } }) {
   return { title: params.slug };
+}
+
+export async function generateStaticParams() {
+  await ensureSeeded();
+  return db.projects.all().map((p) => ({ slug: p.slug }));
 }
 
 export default async function ProjectPage({ params }: { params: { slug: string } }) {

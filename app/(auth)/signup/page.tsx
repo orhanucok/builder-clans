@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
@@ -106,7 +106,7 @@ export default function SignupPage() {
             {errors.password && <p className="mt-1 text-xs text-destructive">{errors.password}</p>}
           </div>
           <Button type="submit" loading={pending} className="w-full">
-            {pending ? 'Creating account…' : 'Create account'}
+            {pending ? 'Creating accountâ€¦' : 'Create account'}
           </Button>
         </form>
         <p className="mt-4 text-center text-xs text-muted-foreground">

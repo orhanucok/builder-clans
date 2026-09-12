@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Hammer, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +10,6 @@ import { formatRelative } from '@/lib/utils';
 import type { TrialStatus } from '@/config/constants';
 
 export const metadata = { title: 'Trials' };
-export const dynamic = 'force-dynamic';
 
 export default async function TrialsPage() {
   await ensureSeeded();
@@ -95,7 +94,7 @@ export default async function TrialsPage() {
               <CardContent className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
-                  {t.duration_days}-day sprint · started {formatRelative(t.starts_at)}
+                  {t.duration_days}-day sprint Â· started {formatRelative(t.starts_at)}
                 </span>
                 <Button asChild size="sm" variant="outline">
                   <Link href={`/trials/${t.id}`}>Open</Link>

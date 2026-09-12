@@ -1,16 +1,23 @@
-'use server';
+/**
+ * Project actions — plain functions usable from client components.
+ * Mutations return their result; navigation happens in the client (router.push).
+ */
 
-import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
+import { getMemoryDb } from '@/lib/db/store/memory';
 import {
-  createProject, updateProject, getProjectById, getProjectBySlug,
-  setProjectSkills, addProjectMember, listProjects,
+  createProject,
+  updateProject,
+  getProjectById,
+  getProjectBySlug,
+  setProjectSkills,
+  addProjectMember,
+  listProjects,
 } from '@/lib/db/store/queries';
 import { projectCreateSchema, projectUpdateSchema } from '@/lib/validation/schemas';
 import { slugify } from '@/lib/utils';
 import { awardXp } from '@/lib/xp/award';
+import { getCurrentClientUser } from '@/lib/auth/demo';
 
 export interface ProjectActionResult {
   ok: boolean;
@@ -21,7 +28,8 @@ export interface ProjectActionResult {
 }
 
 export async function createProjectAction(input: unknown): Promise<ProjectActionResult> {
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   await ensureSeeded();
   const parsed = projectCreateSchema.safeParse(input);
   if (!parsed.success) {
@@ -36,10 +44,8 @@ export async function createProjectAction(input: unknown): Promise<ProjectAction
     return { ok: false, error: 'Minimum commitment cannot exceed maximum.' };
   }
 
-  // Make sure slug is unique
   let slug = slugify(data.title);
   let suffix = 0;
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const candidate = suffix === 0 ? slug : `${slug}-${suffix}`;
     if (!getProjectBySlug(candidate)) {
@@ -80,22 +86,20 @@ export async function createProjectAction(input: unknown): Promise<ProjectAction
     setProjectSkills(project.id, data.requiredSkills);
   }
 
-  // First project XP (idempotent)
   const myProjects = listProjects({ ownerId: me.id, limit: 100 });
   if (myProjects.length === 1) {
     await awardXp(null, { userId: me.id, eventType: 'FIRST_PROJECT' });
   }
 
-  revalidatePath('/projects');
-  revalidatePath('/discover');
-  redirect(`/projects/${slug}`);
+  return { ok: true, slug, id: project.id };
 }
 
 export async function updateProjectAction(
   projectId: string,
   input: unknown,
 ): Promise<ProjectActionResult> {
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = projectUpdateSchema.safeParse(input);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -128,17 +132,12 @@ export async function updateProjectAction(
   if (data.requiredSkills !== undefined) {
     setProjectSkills(projectId, data.requiredSkills);
   }
-  revalidatePath(`/projects/${projectId}`);
   return { ok: true };
 }
 
-/**
- * Mark a project as SHIPPED. Awards big XP to the team.
- */
-export async function markProjectShippedAction(
-  projectId: string,
-): Promise<ProjectActionResult> {
-  const me = await requireUser();
+export async function markProjectShippedAction(projectId: string): Promise<ProjectActionResult> {
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const proj = getProjectById(projectId);
   if (!proj) return { ok: false, error: 'Project not found.' };
   if (proj.owner_id !== me.id) return { ok: false, error: 'Only the owner can ship.' };
@@ -146,9 +145,7 @@ export async function markProjectShippedAction(
 
   updateProject(projectId, { status: 'COMPLETED', stage: 'LAUNCHED' } as never);
 
-  // Award XP to every active member
-  const { db } = await import('@/lib/db/store');
-  const members = db.project_members.list({ project_id: projectId, status: 'ACTIVE' });
+  const members = getMemoryDb().project_members.list({ project_id: projectId, status: 'ACTIVE' });
   for (const m of members) {
     await awardXp(null, {
       userId: m.user_id,
@@ -157,6 +154,5 @@ export async function markProjectShippedAction(
       entityId: projectId,
     });
   }
-  revalidatePath(`/projects/${projectId}`);
   return { ok: true };
 }

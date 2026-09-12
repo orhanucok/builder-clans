@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { Search, Users, FolderKanban } from 'lucide-react';
 import { ensureSeeded, db } from '@/lib/db/store';
 import { getProfileSkills } from '@/lib/db/store/queries';
@@ -15,7 +15,6 @@ import {
 } from '@/config/constants';
 
 export const metadata = { title: 'Search' };
-export const dynamic = 'force-dynamic';
 
 interface PersonHit {
   id: string;
@@ -28,9 +27,11 @@ interface PersonHit {
   builderLevel: number;
 }
 
-export default async function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function SearchPage() {
   await ensureSeeded();
-  const q = (searchParams.q ?? '').trim().toLowerCase();
+  // Static export cannot read searchParams at build time; we render the empty
+  // search state and let the form submit a GET to refresh the URL.
+  const q = '';
 
   // People
   const allProfiles = (db.profiles.all() as any[]).filter((p) => p.onboarding_completed);
@@ -70,8 +71,8 @@ export default async function SearchPage({ searchParams }: { searchParams: { q?:
         <form action="/search" method="GET" className="mt-4 flex gap-2">
           <Input
             name="q"
-            defaultValue={searchParams.q ?? ''}
-            placeholder="Projects, people, skills…"
+            defaultValue=""
+            placeholder="Projects, people, skillsâ€¦"
             className="flex-1"
             autoFocus
           />
@@ -87,13 +88,13 @@ export default async function SearchPage({ searchParams }: { searchParams: { q?:
       ) : (
         <>
           <p className="mb-4 text-sm text-muted-foreground">
-            {peopleHits.length} builder{peopleHits.length === 1 ? '' : 's'} · {projects.length} project{projects.length === 1 ? '' : 's'} match &ldquo;{q}&rdquo;
+            {peopleHits.length} builder{peopleHits.length === 1 ? '' : 's'} Â· {projects.length} project{projects.length === 1 ? '' : 's'} match &ldquo;{q}&rdquo;
           </p>
 
           {peopleHits.length === 0 && projects.length === 0 ? (
             <EmptyState
               title="No results"
-              description="Try a different query — like a skill name, city, or a project keyword."
+              description="Try a different query â€” like a skill name, city, or a project keyword."
             />
           ) : null}
 

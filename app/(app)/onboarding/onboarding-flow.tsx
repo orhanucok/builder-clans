@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -218,7 +218,7 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
                 <Label htmlFor="headline">Headline (optional)</Label>
                 <Input
                   id="headline"
-                  placeholder="e.g. CS student · Loves medical imaging"
+                  placeholder="e.g. CS student Â· Loves medical imaging"
                   value={data.headline}
                   onChange={(e) => setData({ ...data, headline: e.target.value })}
                   className="mt-1"
@@ -242,7 +242,7 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
                   <Label htmlFor="institution">Institution (optional)</Label>
                   <Input
                     id="institution"
-                    placeholder="University, lab, company…"
+                    placeholder="University, lab, companyâ€¦"
                     value={data.institution}
                     onChange={(e) => setData({ ...data, institution: e.target.value })}
                     className="mt-1"
@@ -290,7 +290,7 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
               <div className="space-y-2">
                 <div className="relative">
                   <Input
-                    placeholder="Search or add a custom skill…"
+                    placeholder="Search or add a custom skillâ€¦"
                     value={customSkill}
                     onChange={(e) => {
                       setCustomSkill(e.target.value);
@@ -437,7 +437,7 @@ export function OnboardingFlow({ initialDisplayName, initialUsername }: Onboardi
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Signed in as <Badge variant="muted">@{initialUsername}</Badge>
-        <span className="mx-2">·</span>
+        <span className="mx-2">Â·</span>
         <span>Step {step + 1} of {totalSteps}</span>
       </p>
     </div>
@@ -457,7 +457,7 @@ const SUBTITLES = [
   'We tailor the experience to your background.',
   'Visible on your profile. You can edit later.',
   'These power the matching engine.',
-  'Optional. Pick a few — we use them to suggest projects.',
+  'Optional. Pick a few â€” we use them to suggest projects.',
   'Honest answer is fine. You can change it anytime.',
   'Last step. Then we ship you to the projects.',
 ];

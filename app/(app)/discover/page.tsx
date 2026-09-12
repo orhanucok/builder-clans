@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import { listProjects } from '@/lib/db/queries/projects';
 import { suggestProjectsForCurrentUser } from '@/lib/matching/generate';
 import { ProjectCard, type ProjectCardData } from '@/components/project/project-card';
@@ -16,7 +16,6 @@ import { ensureSeeded, db } from '@/lib/db/store';
 import { cn } from '@/lib/utils';
 
 export const metadata = { title: 'Discover projects' };
-export const dynamic = 'force-dynamic';
 
 interface SearchParams {
   tab?: 'for-you' | 'new' | 'needs';
@@ -27,14 +26,17 @@ interface SearchParams {
   skill?: string;
 }
 
-export default async function DiscoverPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function DiscoverPage() {
   await ensureSeeded();
-  const tab = (searchParams.tab ?? 'for-you') as 'for-you' | 'new' | 'needs';
-  const q = searchParams.q ?? null;
-  const category = searchParams.category;
-  const stage = searchParams.stage;
-  const remote = searchParams.remote;
-  const skill = searchParams.skill;
+  // Static export cannot read searchParams at build time, so all filtering
+  // happens client-side via <DiscoverClient/> below. We still compute the
+  // initial three feeds here so the first paint has real data.
+  const tab = 'for-you' as 'for-you' | 'new' | 'needs';
+  const q = null as string | null;
+  const category = undefined as ProjectCategory | undefined;
+  const stage = undefined as ProjectStage | undefined;
+  const remote = undefined as RemoteMode | undefined;
+  const skill = null as string | null;
   const user = await getCurrentUser();
 
   // Pre-compute all three feeds so tabs switch instantly.
@@ -208,7 +210,7 @@ function DiscoverFilters({ q, category, stage, remote, skill, clearHref }: Filte
         <input
           name="q"
           defaultValue={q ?? ''}
-          placeholder="Search by title, description, or tag…"
+          placeholder="Search by title, description, or tagâ€¦"
           className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
         {category ? <input type="hidden" name="category" value={category} /> : null}
@@ -276,7 +278,7 @@ function DiscoverFilters({ q, category, stage, remote, skill, clearHref }: Filte
           <Link href={clearHref} className="font-medium text-foreground hover:underline">
             Clear all filters
           </Link>
-          <span className="text-muted-foreground">·</span>
+          <span className="text-muted-foreground">Â·</span>
           <span className="text-muted-foreground">{countActiveFilters(q, category, stage, remote, skill)} active</span>
         </div>
       ) : null}
@@ -334,7 +336,7 @@ function ProjectGrid({
             {emptyFiltersClearHref ? (
               <div className="mt-3">
                 <Link href={emptyFiltersClearHref} className="text-xs font-medium text-foreground hover:underline">
-                  Clear filters →
+                  Clear filters â†’
                 </Link>
               </div>
             ) : null}

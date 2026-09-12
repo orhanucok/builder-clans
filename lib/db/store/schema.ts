@@ -4,16 +4,18 @@
  * Real Supabase handles auth.users in a separate schema. In demo mode we
  * keep a single in-memory map from user id -> { email, password_hash,
  * created_at }. The "password_hash" is just the password string (clearly
- * demo-only) so sign-in works without a real bcrypt.
+ * demo-only) so sign-in works without a real bcrypt or `node:crypto`.
  */
-
-import { randomUUID, createHash } from 'node:crypto';
 
 export interface DemoUser {
   id: string;
   email: string;
   password: string; // demo only; in real Supabase this lives in auth.users
   created_at: string;
+}
+
+function shortId(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
 
 class AuthStore {
@@ -27,7 +29,7 @@ class AuthStore {
       throw new Error('A user with this email already exists.');
     }
     const user: DemoUser = {
-      id: randomUUID(),
+      id: shortId('usr'),
       email: normalized,
       password: hashPassword(password),
       created_at: new Date().toISOString(),
@@ -50,7 +52,7 @@ class AuthStore {
   }
 
   createSession(userId: string): string {
-    const token = randomUUID();
+    const token = shortId('s');
     this.sessions.set(token, userId);
     return token;
   }
@@ -73,8 +75,9 @@ class AuthStore {
 }
 
 function hashPassword(p: string): string {
-  // demo only — never use this in production.
-  return createHash('sha256').update(`bc-demo-salt::${p}`).digest('hex');
+  // demo only — never use this in production. We intentionally avoid
+  // `node:crypto` so this module can be bundled into the browser.
+  return p;
 }
 
 let _auth: AuthStore | null = null;

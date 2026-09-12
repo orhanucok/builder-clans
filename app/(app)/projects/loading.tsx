@@ -1,11 +1,11 @@
-import { Spinner } from '@/components/ui/spinner';
+﻿import { Spinner } from '@/components/ui/spinner';
 
 export default function Loading() {
   return (
     <div className="container-wide grid min-h-[60vh] place-items-center">
       <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
         <Spinner size="lg" />
-        <span>Loading projects…</span>
+        <span>Loading projectsâ€¦</span>
       </div>
     </div>
   );

@@ -1,13 +1,17 @@
-'use server';
+/**
+ * Settings actions — plain functions usable from client components.
+ */
 
-import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
 import {
-  updateProfile, setProfileSkills, setProfileInterests, getProfileById,
+  updateProfile,
+  setProfileSkills,
+  setProfileInterests,
+  getProfileById,
 } from '@/lib/db/store/queries';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
+import { getCurrentClientUser } from '@/lib/auth/demo';
 
 export interface SettingsResult {
   ok: boolean;
@@ -18,7 +22,8 @@ export interface SettingsResult {
 export async function updateProfileAction(
   input: z.input<typeof profileUpdateSchema>,
 ): Promise<SettingsResult> {
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   await ensureSeeded();
   const parsed = profileUpdateSchema.safeParse(input);
   if (!parsed.success) {
@@ -44,8 +49,6 @@ export async function updateProfileAction(
   }
   if (data.skills) setProfileSkills(me.id, data.skills);
   if (data.interests) setProfileInterests(me.id, data.interests);
-  const profile = getProfileById(me.id);
-  revalidatePath('/settings');
-  if (profile) revalidatePath(`/people/${profile.username}`);
+  void getProfileById(me.id);
   return { ok: true };
 }

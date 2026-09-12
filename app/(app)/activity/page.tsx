@@ -1,4 +1,4 @@
-import Link from 'next/link';
+﻿import Link from 'next/link';
 import {
   Sparkles, Hammer, Rocket, UserPlus, FileEdit, Trophy, Plus, MessageSquare,
 } from 'lucide-react';
@@ -10,7 +10,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { formatRelative } from '@/lib/utils';
 
 export const metadata = { title: 'Activity' };
-export const dynamic = 'force-dynamic';
 
 type ActivityItem = {
   id: string;
@@ -139,7 +138,7 @@ export default async function ActivityPage() {
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          What&apos;s happening across the network — new projects, applications, trials, and shipped work.
+          What&apos;s happening across the network â€” new projects, applications, trials, and shipped work.
         </p>
       </header>
 

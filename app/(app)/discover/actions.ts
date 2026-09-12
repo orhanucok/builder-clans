@@ -1,16 +1,23 @@
-'use server';
+/**
+ * Discover / match actions — plain functions usable from client components.
+ */
 
-import { revalidatePath } from 'next/cache';
-import { requireUser } from '@/lib/auth/session';
-import { ensureSeeded, db } from '@/lib/db/store';
+import { ensureSeeded } from '@/lib/db/store/seed';
+import { getMemoryDb } from '@/lib/db/store/memory';
 import {
-  getProjectById, createApplication, listApplicationsForProject, createMatch, getMatch, updateMatch,
+  getProjectById,
+  createApplication,
+  listApplicationsForProject,
+  createMatch,
+  getMatch,
+  updateMatch,
+  createProjectRole,
 } from '@/lib/db/store/queries';
 import { z } from 'zod';
 import { projectRoleCreateSchema } from '@/lib/validation/schemas';
 import { canTransition, StatusMachines } from '@/config/transitions';
 import type { ApplicationStatus, MatchStatus } from '@/config/constants';
-import { createProjectRole } from '@/lib/db/store/queries';
+import { getCurrentClientUser } from '@/lib/auth/demo';
 
 export interface ServerActionResult {
   ok: boolean;
@@ -28,26 +35,19 @@ const applySchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-/**
- * Candidate applies to a project (or a specific role).
- * Creates an application + a match row in APPLIED status.
- */
-export async function applyToProjectAction(
-  input: z.input<typeof applySchema>,
-): Promise<ServerActionResult> {
+export async function applyToProjectAction(input: z.input<typeof applySchema>): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = applySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
 
-  // Sanity: cannot apply to own project
   const project = getProjectById(data.projectId);
   if (!project) return { ok: false, error: 'Project not found.' };
   if (project.owner_id === me.id) return { ok: false, error: 'You cannot apply to your own project.' };
   if (project.status !== 'ACTIVE') return { ok: false, error: 'Project is not accepting applications.' };
 
-  // Check for an existing application
   const existing = listApplicationsForProject(data.projectId).find(
     (a) => a.applicant_id === me.id,
   );
@@ -65,7 +65,6 @@ export async function applyToProjectAction(
     note: data.note,
   });
 
-  // Create a match row in APPLIED
   createMatch({
     project_id: data.projectId,
     role_id: data.roleId ?? null,
@@ -74,8 +73,6 @@ export async function applyToProjectAction(
     status: 'APPLIED',
   });
 
-  revalidatePath(`/projects/${data.projectId}`);
-  revalidatePath('/matches');
   return { ok: true };
 }
 
@@ -85,14 +82,10 @@ const inviteSchema = z.object({
   candidateUserId: z.string(),
 });
 
-/**
- * Project owner invites a candidate. Creates a match in INVITED status.
- */
-export async function inviteCandidateAction(
-  input: z.input<typeof inviteSchema>,
-): Promise<ServerActionResult> {
+export async function inviteCandidateAction(input: z.input<typeof inviteSchema>): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = inviteSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const data = parsed.data;
@@ -101,8 +94,8 @@ export async function inviteCandidateAction(
   if (!project) return { ok: false, error: 'Project not found.' };
   if (project.owner_id !== me.id) return { ok: false, error: 'Only the project owner can invite.' };
 
-  // Upsert match row in INVITED status
-  const existing = (db.matches.all() as any).find(
+  const db = getMemoryDb();
+  const existing = (db.matches.all() as Array<{ id: string; project_id: string; candidate_user_id: string; status: string }>).find(
     (m) => m.project_id === data.projectId && m.candidate_user_id === data.candidateUserId,
   );
   if (existing) {
@@ -120,17 +113,13 @@ export async function inviteCandidateAction(
     });
   }
 
-  revalidatePath('/matches');
-  revalidatePath(`/projects/${data.projectId}`);
   return { ok: true };
 }
 
-/**
- * Accept a match. Becomes MUTUAL.
- */
 export async function acceptMatchAction(matchId: string): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const match = getMatch(matchId);
   if (!match) return { ok: false, error: 'Match not found.' };
 
@@ -142,14 +131,13 @@ export async function acceptMatchAction(matchId: string): Promise<ServerActionRe
     return { ok: false, error: 'Not allowed.' };
   }
   updateMatch(matchId, { status: newStatus } as never);
-  revalidatePath('/matches');
-  revalidatePath(`/projects/${match.project_id}`);
   return { ok: true };
 }
 
 export async function declineMatchAction(matchId: string): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const match = getMatch(matchId);
   if (!match) return { ok: false, error: 'Match not found.' };
 
@@ -164,55 +152,50 @@ export async function declineMatchAction(matchId: string): Promise<ServerActionR
     return { ok: false, error: `Cannot decline a ${match.status} match.` };
   }
   updateMatch(matchId, { status: 'DECLINED' } as never);
-  revalidatePath('/matches');
   return { ok: true };
 }
-
-// ---------------------------------------------------------------------------
-// Application decisions (owner only)
-// ---------------------------------------------------------------------------
 
 const decideSchema = z.object({
   applicationId: z.string(),
   decision: z.enum(['ACCEPTED', 'REJECTED']),
 });
 
-export async function decideApplicationAction(
-  input: z.input<typeof decideSchema>,
-): Promise<ServerActionResult> {
+export async function decideApplicationAction(input: z.input<typeof decideSchema>): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = decideSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
-  const app = db.applications.get(input.applicationId);
+  const db = getMemoryDb();
+  const app = db.applications.get(parsed.data.applicationId) as { id: string; status: string; project_id: string } | null;
   if (!app) return { ok: false, error: 'Application not found.' };
-  if (!canTransition<ApplicationStatus>(StatusMachines.application, app.status as ApplicationStatus, parsed.data.decision)) {
+  if (
+    !canTransition<ApplicationStatus>(
+      StatusMachines.application,
+      app.status as ApplicationStatus,
+      parsed.data.decision,
+    )
+  ) {
     return { ok: false, error: `Cannot ${parsed.data.decision.toLowerCase()} a ${app.status} application.` };
   }
   const proj = getProjectById(app.project_id);
   if (proj?.owner_id !== me.id) return { ok: false, error: 'Only the owner can decide.' };
 
-  db.applications.update(input.applicationId, {
+  db.applications.update(parsed.data.applicationId, {
     status: parsed.data.decision,
     decided_at: new Date().toISOString(),
   } as never);
-  revalidatePath(`/projects/${app.project_id}`);
   return { ok: true };
 }
-
-// ---------------------------------------------------------------------------
-// Open role creation (owner only)
-// ---------------------------------------------------------------------------
 
 const createRoleSchema = projectRoleCreateSchema.extend({
   projectId: z.string(),
 });
 
-export async function createProjectRoleAction(
-  input: z.input<typeof createRoleSchema>,
-): Promise<ServerActionResult> {
+export async function createProjectRoleAction(input: z.input<typeof createRoleSchema>): Promise<ServerActionResult> {
   await ensureSeeded();
-  const me = await requireUser();
+  const me = getCurrentClientUser();
+  if (!me) return { ok: false, error: 'Not signed in.' };
   const parsed = createRoleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'Invalid input' };
   const proj = getProjectById(parsed.data.projectId);
@@ -226,6 +209,5 @@ export async function createProjectRoleAction(
     experience_level: parsed.data.experienceLevel as string,
     required_skills: parsed.data.requiredSkills,
   });
-  revalidatePath(`/projects/${parsed.data.projectId}`);
   return { ok: true, id: role.id };
 }

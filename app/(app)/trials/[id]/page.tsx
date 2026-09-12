@@ -15,7 +15,11 @@ import { formatRelative } from '@/lib/utils';
 import type { TrialStatus } from '@/config/constants';
 
 export const metadata = { title: 'Trial' };
-export const dynamic = 'force-dynamic';
+
+export async function generateStaticParams() {
+  await ensureSeeded();
+  return db.trials.all().map((t) => ({ id: t.id }));
+}
 
 export default async function TrialPage({ params }: { params: { id: string } }) {
   await ensureSeeded();

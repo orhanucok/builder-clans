@@ -267,24 +267,23 @@ function ChatPanel({ trialId, channelId, currentUserId, canPost, members }: Tria
 
     load();
 
-    if (typeof window !== 'undefined' && 'EventSource' in window) {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
-        es = new EventSource(`/api/chat/${channelId}/events`);
-        es.addEventListener('message', (ev) => {
-          try {
-            const msg = JSON.parse((ev as MessageEvent).data);
-            setMessages((cur) => {
-              if (cur.some((m) => m.id === msg.id)) return cur;
-              return [...cur, { id: msg.id, content: msg.content, sender_id: msg.sender_id, created_at: msg.created_at }];
-            });
-          } catch { /* ignore parse */ }
-        });
-        es.addEventListener('ready', () => setLoading(false));
-        es.addEventListener('error', () => {
-          // SSE failed (proxy, server, etc) — fall back to polling.
-          if (es) { es.close(); es = null; }
-          startPolling();
-        });
+        const bc = new BroadcastChannel(`bc.chat.${channelId}`);
+        bc.onmessage = (ev) => {
+          const msg = ev.data as { id: string; content: string; sender_id: string; created_at: string };
+          if (!msg || !msg.id) return;
+          setMessages((cur) => {
+            if (cur.some((m) => m.id === msg.id)) return cur;
+            return [...cur, msg];
+          });
+        };
+        // Keep a reference so the cleanup can close the channel.
+        // (We reuse the local `es` variable to avoid changing the cleanup
+        // signature elsewhere in the file.)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (es as unknown as { close: () => void } | null) = { close: () => bc.close() };
+        setLoading(false);
       } catch {
         startPolling();
       }

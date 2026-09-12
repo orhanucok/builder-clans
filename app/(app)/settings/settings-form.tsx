@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -156,7 +156,7 @@ export function SettingsForm({
             value={form.avatarUrl.startsWith('data:') ? '' : form.avatarUrl}
             onChange={(e) => setForm({ ...form, avatarUrl: e.target.value })}
             className="mt-2"
-            placeholder="https://…"
+            placeholder="https://â€¦"
           />
         </div>
       </div>
