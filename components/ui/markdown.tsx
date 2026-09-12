@@ -32,7 +32,7 @@ function escapeHtml(s: string): string {
 // Convert escaped text to React with markdown rules. Pure function.
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   const out: React.ReactNode[] = [];
-  let remaining = text;
+  const remaining = text;
   let counter = 0;
 
   // Patterns: [text](url), `code`, **bold**, *italic*
