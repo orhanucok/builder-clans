@@ -29,9 +29,9 @@ const ENV_MAP: Record<FeatureFlag, string | undefined> = {
 
 const DEFAULTS: Record<FeatureFlag, boolean> = {
   AI_FEATURES: true,
-  CLANS: false,
-  LEADERBOARD: false,
-  CHALLENGES: false,
+  CLANS: true,
+  LEADERBOARD: true,
+  CHALLENGES: true,
   NATIVE_CHAT: true,
   GITHUB_INTEGRATION: false,
 };

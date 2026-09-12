@@ -546,6 +546,88 @@ export function isClanMember(clanId: string, userId: string): boolean {
   return db.clan_members.findOne((m) => (m as { clan_id: string; user_id: string }).clan_id === clanId && (m as { user_id: string }).user_id === userId) !== null;
 }
 
+interface ClanCreateInput {
+  name: string;
+  description: string | null;
+  type: string;
+  owner_id: string;
+  institution: string | null;
+  country_code: string | null;
+}
+
+export function createClan(input: ClanCreateInput): Row<'clans'> {
+  const baseSlug = input.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+  let slug = baseSlug || 'clan';
+  let suffix = 0;
+  while (getClanBySlug(slug)) {
+    suffix += 1;
+    if (suffix > 50) {
+      slug = `${baseSlug}-${Math.random().toString(36).slice(2, 7)}`;
+      break;
+    }
+    slug = `${baseSlug}-${suffix}`;
+  }
+  const id = `cln_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
+  const clan = db.clans.insert({
+    id,
+    slug,
+    name: input.name,
+    description: input.description,
+    type: input.type as never,
+    institution: input.institution,
+    country_code: input.country_code,
+    visibility: 'PUBLIC' as never,
+    owner_id: input.owner_id,
+    xp: 0,
+    lifetime_xp: 0,
+    created_at: new Date().toISOString(),
+  } as never);
+  db.clan_members.insert({
+    clan_id: id,
+    user_id: input.owner_id,
+    role: 'OWNER' as never,
+    joined_at: new Date().toISOString(),
+  } as never);
+  return clan;
+}
+
+export interface ClanActionResult {
+  ok: boolean;
+  error?: string;
+  slug?: string;
+}
+
+export function joinClan(clanId: string, userId: string): ClanActionResult {
+  if (!clanId || !userId) return { ok: false, error: 'Missing clan or user.' };
+  const clan = getClanById(clanId);
+  if (!clan) return { ok: false, error: 'Clan not found.' };
+  if (isClanMember(clanId, userId)) return { ok: false, error: 'Already a member.' };
+  db.clan_members.insert({
+    clan_id: clanId,
+    user_id: userId,
+    role: 'MEMBER' as never,
+    joined_at: new Date().toISOString(),
+  } as never);
+  return { ok: true, slug: clan.slug };
+}
+
+export function leaveClan(clanId: string, userId: string): ClanActionResult {
+  if (!clanId || !userId) return { ok: false, error: 'Missing clan or user.' };
+  const clan = getClanById(clanId);
+  if (!clan) return { ok: false, error: 'Clan not found.' };
+  if (clan.owner_id === userId) return { ok: false, error: 'Owner cannot leave their own clan.' };
+  const member = db.clan_members.findOne(
+    (m) => (m as { clan_id: string; user_id: string }).clan_id === clanId && (m as { user_id: string }).user_id === userId,
+  );
+  if (!member) return { ok: false, error: 'You are not a member of this clan.' };
+  db.clan_members.delete((member as { id: string }).id);
+  return { ok: true, slug: clan.slug };
+}
+
 // ---------------------------------------------------------------------------
 // Reports
 // ---------------------------------------------------------------------------

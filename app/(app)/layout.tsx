@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ClientAuthGuard } from '@/components/layout/client-auth-guard';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
@@ -10,7 +11,7 @@ import { SetupBanner } from '@/components/layout/setup-banner';
 import { WelcomeBanner } from '@/components/layout/welcome-banner';
 import { hydrate } from '@/lib/db/store/persistence';
 import { ensureSeeded } from '@/lib/db/store/seed';
-import { getCurrentClientUser } from '@/lib/auth/demo';
+import { getCurrentClientUser, switchPersonaAction } from '@/lib/auth/demo';
 import { isFeatureEnabled } from '@/config/feature-flags';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -26,6 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isNewUser, setIsNewUser] = useState(false);
   const [projects, setProjects] = useState<Array<{ id: string; slug: string; title: string; shortDescription: string; ownerUsername: string; ownerDisplayName: string }>>([]);
   const [people, setPeople] = useState<Array<{ id: string; username: string; displayName: string; headline: string | null }>>([]);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +35,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       await hydrate();
       await ensureSeeded();
       if (cancelled) return;
+      // Demo auto-login: `?demo=<persona-email>` signs the visitor in as that
+      // persona in one step. Useful for shared URLs, screen recordings, and
+      // ad-hoc QA. No-op in production if no demo email is supplied.
+      const demo = searchParams?.get('demo');
+      if (demo) {
+        await switchPersonaAction(demo);
+      }
       const u = getCurrentClientUser();
       if (u) {
         const { getProfileById, listSavedProjectsForUser } = await import('@/lib/db/store/queries');

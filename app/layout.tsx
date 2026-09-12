@@ -1,7 +1,7 @@
 ﻿import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-import { getEnv } from '@/lib/env';
+import { getPublicEnv } from '@/lib/env';
 import { Toaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
 
@@ -60,8 +60,8 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Validate env at boot. Throws on boot if a required value is malformed.
-  getEnv();
+  // Touch public env at boot so build-time validation runs.
+  getPublicEnv();
   return (
     <html
       lang="en"

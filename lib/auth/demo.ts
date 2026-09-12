@@ -197,10 +197,18 @@ export async function signOutAction(): Promise<void> {
 }
 
 export async function switchPersonaAction(personaEmail: string): Promise<ActionResult> {
-  const auth = getDemoAuth();
-  const user = auth.getByEmail(personaEmail);
-  if (!user) return { ok: false, error: `No demo persona with email ${personaEmail}.` };
-  setClientSession(user.id);
+  // Look up the persona across the seeded profile data — the legacy
+  // `bc.demo.auth` localStorage blob only has demo signups, so it misses the
+  // 30 seeded demo accounts. Profiles always include email, so we use them
+  // as the canonical persona map.
+  const { ensureSeeded } = await import('@/lib/db/store/seed');
+  const { getMemoryDb } = await import('@/lib/db/store/memory');
+  await ensureSeeded();
+  const profile = getMemoryDb().profiles.findOne(
+    (p) => (p as { email: string | null }).email?.toLowerCase() === personaEmail.toLowerCase(),
+  );
+  if (!profile) return { ok: false, error: `No demo persona with email ${personaEmail}.` };
+  setClientSession((profile as { id: string }).id);
   return { ok: true };
 }
 

@@ -1,94 +1,111 @@
 /**
- * Builder Clans — Environment validation
+ * Builder Clans — Environment access.
  *
- * Master plan §115: validate env vars at boot. Never crash silently in prod.
- *
- * Uses zod for runtime validation. Imported ONCE at app startup (see app/layout.tsx)
- * so any missing required var throws immediately.
+ * Two surfaces:
+ *   - `getPublicEnv()` — client-safe, reads only NEXT_PUBLIC_* vars. The
+ *     static export inlines these at build time so no server runtime is
+ *     needed.
+ *   - `getEnv()` — server-only. Reads the full schema (including private
+ *     keys like SUPABASE_SERVICE_ROLE_KEY and AI_API_KEY). On the server
+ *     during static export the values are all `undefined`; the schema is
+ *     lenient (every non-public var is optional) so this returns the
+ *     defaults without throwing. Client bundles that accidentally import
+ *     this function will see `process is not defined` at runtime, but that
+ *     path is unused in static mode — all client code goes through
+ *     `getPublicEnv()`.
  */
 
 import { z } from 'zod';
 
-const envSchema = z.object({
+const publicSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   NEXT_PUBLIC_APP_NAME: z.string().default('Builder Clans'),
-
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
-  DATABASE_URL: z.string().optional(),
-
-  AI_PROVIDER: z.enum(['openai', 'anthropic', 'mock']).default('mock'),
-  AI_API_KEY: z.string().optional(),
-  AI_MODEL_DEFAULT: z.string().default('gpt-4o-mini'),
-
+  NEXT_PUBLIC_PUSHER_KEY: z.string().optional(),
+  NEXT_PUBLIC_PUSHER_CLUSTER: z.string().optional(),
   NEXT_PUBLIC_ANALYTICS_ENABLED: z
     .string()
     .default('false')
     .transform((v) => v === 'true'),
-  NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
-  NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
-
-  NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
-  SENTRY_AUTH_TOKEN: z.string().optional(),
-
   FEATURE_AI: z
     .string()
     .default('true')
     .transform((v) => v === 'true'),
   FEATURE_CLANS: z
     .string()
-    .default('false')
+    .default('true')
     .transform((v) => v === 'true'),
   FEATURE_LEADERBOARD: z
     .string()
-    .default('false')
+    .default('true')
     .transform((v) => v === 'true'),
   FEATURE_CHALLENGES: z
     .string()
-    .default('false')
+    .default('true')
     .transform((v) => v === 'true'),
   FEATURE_NATIVE_CHAT: z
     .string()
     .default('true')
     .transform((v) => v === 'true'),
-  FEATURE_GITHUB_INTEGRATION: z
-    .string()
-    .default('false')
-    .transform((v) => v === 'true'),
-
-  RATE_LIMIT_DEFAULT_PER_MINUTE: z.coerce.number().default(60),
-  RATE_LIMIT_AI_PER_MINUTE: z.coerce.number().default(20),
-
-  SEED_USER_PASSWORD: z.string().default('builder-clans-demo-2026'),
-
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 
-export type Env = z.infer<typeof envSchema>;
+const fullSchema = publicSchema.extend({
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  DATABASE_URL: z.string().optional(),
+  AI_PROVIDER: z.enum(['openai', 'anthropic', 'mock']).default('mock'),
+  AI_API_KEY: z.string().optional(),
+  AI_MODEL_DEFAULT: z.string().default('gpt-4o-mini'),
+  RATE_LIMIT_DEFAULT_PER_MINUTE: z.coerce.number().default(60),
+  RATE_LIMIT_AI_PER_MINUTE: z.coerce.number().default(20),
+  SEED_USER_PASSWORD: z.string().default('builder-clans-demo-2026'),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
+});
 
-let cached: Env | null = null;
+export type PublicEnv = z.infer<typeof publicSchema>;
+export type FullEnv = z.infer<typeof fullSchema>;
 
-export function getEnv(): Env {
-  if (cached) return cached;
-  const parsed = envSchema.safeParse(process.env);
-  if (!parsed.success) {
-    // We log all missing/invalid keys but never leak values.
-    const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[Builder Clans] Environment validation produced warnings:\n${issues}\nFalling back to defaults.`,
-    );
-  }
-  cached = (parsed.success ? parsed.data : envSchema.parse({})) as Env;
-  return cached;
+let publicCached: PublicEnv | null = null;
+let fullCached: FullEnv | null = null;
+
+function safeParse<T extends z.ZodTypeAny>(schema: T, raw: Record<string, unknown>): z.SafeParseReturnType<unknown, z.infer<T>> {
+  return schema.safeParse(raw) as z.SafeParseReturnType<unknown, z.infer<T>>;
 }
 
 /**
- * Whether Supabase is configured. Routes that need DB will redirect to setup
- * when this returns false. Lets the app boot on a fresh clone without secrets.
+ * Public env — safe to call from client components. Reads only NEXT_PUBLIC_*
+ * keys so the static export's inlined values are enough.
  */
+export function getPublicEnv(): PublicEnv {
+  if (publicCached) return publicCached;
+  const raw: Record<string, unknown> = {};
+  if (typeof process !== 'undefined' && process.env) {
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.startsWith('NEXT_PUBLIC_') || k.startsWith('FEATURE_')) raw[k] = v;
+    }
+  }
+  const parsed = safeParse(publicSchema, raw);
+  publicCached = parsed.success ? parsed.data : (publicSchema.parse({}) as PublicEnv);
+  return publicCached;
+}
+
+/**
+ * Full env — server-side. Used by Supabase server client, AI provider,
+ * analytics, etc. Always returns defaults if `process.env` is unavailable.
+ */
+export function getEnv(): FullEnv {
+  if (fullCached) return fullCached;
+  const raw = (typeof process !== 'undefined' && process.env ? process.env : {}) as Record<string, unknown>;
+  const parsed = safeParse(fullSchema, raw);
+  if (!parsed.success) {
+    // eslint-disable-next-line no-console
+    console.warn('[Builder Clans] env validation warnings:\n' + parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n'));
+  }
+  fullCached = parsed.success ? parsed.data : (fullSchema.parse({}) as FullEnv);
+  return fullCached;
+}
+
 export function isSupabaseConfigured(): boolean {
-  const env = getEnv();
+  const env = getPublicEnv();
   return Boolean(env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 }
